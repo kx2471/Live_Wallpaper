@@ -120,7 +120,7 @@ settings_icon = pygame.transform.scale(settings_icon, (button_size, button_size)
 # 음량 조절바 설정
 volume_slider_width = 150
 volume_slider_height = 10
-volume_slider_x = work_area_width - volume_slider_width - 20
+volume_slider_x = work_area_width - volume_slider_width - 80  # 오른쪽 여백 증가 (20 -> 80)
 volume_slider_y = work_area_height - 35
 
 # 버튼 위치 (음량 조절바 왼쪽으로 이동)
