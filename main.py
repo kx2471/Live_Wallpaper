@@ -265,8 +265,26 @@ if not cap.isOpened():
     pygame.quit()
     sys.exit(1)
 
+# 비디오 FPS 가져오기
+video_fps = cap.get(cv2.CAP_PROP_FPS)
+if video_fps <= 0 or video_fps > 120:  # 유효하지 않은 FPS 값 처리
+    video_fps = 30.0
+    print(f"Warning: Invalid FPS detected, using default 30 FPS")
+else:
+    print(f"Video FPS: {video_fps}")
+
+# 비디오 길이 계산 (초 단위)
+total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+video_duration = total_frames / video_fps if video_fps > 0 else 0
+print(f"Video duration: {video_duration:.2f} seconds ({total_frames} frames)")
+
 clock = pygame.time.Clock()
 running = True
+
+# 동기화를 위한 시작 시간 기록
+video_start_time = time.time()
+sync_check_interval = 5.0  # 5초마다 동기화 체크
+last_sync_check = video_start_time
 
 try:
     import time
@@ -335,6 +353,19 @@ try:
                     print(f"ERROR: Failed to open video: {new_video_path}")
                 else:
                     print("Video loaded successfully!")
+
+                    # 새 비디오의 FPS 가져오기
+                    video_fps = cap.get(cv2.CAP_PROP_FPS)
+                    if video_fps <= 0 or video_fps > 120:
+                        video_fps = 30.0
+                        print(f"Warning: Invalid FPS detected, using default 30 FPS")
+                    else:
+                        print(f"New video FPS: {video_fps}")
+
+                    # 비디오 길이 계산
+                    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+                    video_duration = total_frames / video_fps if video_fps > 0 else 0
+                    print(f"New video duration: {video_duration:.2f} seconds ({total_frames} frames)")
                     # 새 오디오 추출
                     try:
                         print("Extracting audio from new video...")
@@ -352,6 +383,10 @@ try:
                             pygame.mixer.music.play(-1)
                             has_audio = True
                             print(f"Audio loaded successfully! (Muted: {muted}, Volume: {volume})")
+
+                            # 새 동영상 시작 시간 재설정
+                            video_start_time = time.time()
+                            last_sync_check = video_start_time
                         else:
                             print("No audio track found in new video.")
                             has_audio = False
@@ -377,8 +412,43 @@ try:
 
         ret, frame = cap.read()
         if not ret:
-            cap.set(cv2.CAP_PROP_POS_FRAMES, 0)  # 영상 반복
+            # 영상이 끝났으므로 비디오와 오디오 모두 재시작
+            cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+            if has_audio:
+                pygame.mixer.music.stop()
+                pygame.mixer.music.play(-1)
+                print("Video loop: Restarting audio for sync")
+            # 시작 시간 재설정
+            video_start_time = time.time()
+            last_sync_check = video_start_time
             continue
+
+        # 주기적인 동기화 체크 (5초마다)
+        current_time = time.time()
+        if has_audio and current_time - last_sync_check >= sync_check_interval:
+            # 비디오의 현재 재생 시간 계산 (초 단위)
+            current_frame = cap.get(cv2.CAP_PROP_POS_FRAMES)
+            video_position = current_frame / video_fps
+
+            # 실제 경과 시간
+            elapsed_time = current_time - video_start_time
+            elapsed_time_in_video = elapsed_time % video_duration  # 루프 고려
+
+            # 시간 차이 계산
+            time_diff = abs(video_position - elapsed_time_in_video)
+
+            # 0.5초 이상 차이나면 동기화 조정
+            if time_diff > 0.5:
+                print(f"Sync check: Video at {video_position:.2f}s, Expected {elapsed_time_in_video:.2f}s (diff: {time_diff:.2f}s)")
+                # 오디오 재시작으로 동기화
+                pygame.mixer.music.stop()
+                pygame.mixer.music.play(-1)
+                # 비디오 위치도 조정
+                target_frame = int(elapsed_time_in_video * video_fps)
+                cap.set(cv2.CAP_PROP_POS_FRAMES, target_frame)
+                print(f"Resynced: Adjusted to frame {target_frame}")
+
+            last_sync_check = current_time
 
         # OpenCV는 BGR, pygame은 RGB 사용
         frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -463,7 +533,8 @@ try:
 
         pygame.display.flip()
 
-        clock.tick(30)  # 30 FPS
+        # 비디오의 실제 FPS 사용
+        clock.tick(video_fps)
 
 except KeyboardInterrupt:
     print("Program terminated by user.")
