@@ -87,9 +87,9 @@ settings_clicked = False
 reload_video = False  # 동영상 재로드 플래그
 
 # 아이콘 표시 상태
-show_icons = True
 import time
-last_mouse_move_time = time.time()
+show_icons = True
+last_mouse_move_time = time.time()  # 현재 시간으로 초기화하여 시작시 아이콘 표시
 icon_show_duration = 10.0  # 10초
 
 # 호버 상태 추적
@@ -199,13 +199,17 @@ mouse_thread.start()
 
 # 동영상에서 오디오 추출
 print("Extracting audio...")
+audio_path = None
+has_audio = False
+
 try:
     video_clip = VideoFileClip(video_path)
-    audio_file = tempfile.NamedTemporaryFile(delete=False, suffix='.mp3')
-    audio_path = audio_file.name
-    audio_file.close()
 
     if video_clip.audio is not None:
+        audio_file = tempfile.NamedTemporaryFile(delete=False, suffix='.mp3')
+        audio_path = audio_file.name
+        audio_file.close()
+
         video_clip.audio.write_audiofile(audio_path, logger=None)
         pygame.mixer.music.load(audio_path)
 
@@ -215,14 +219,15 @@ try:
 
         pygame.mixer.music.play(-1)  # 무한 반복
         has_audio = True
+        print(f"Audio loaded successfully. Muted: {muted}, Volume: {volume}")
     else:
         print("No audio in video.")
-        has_audio = False
 
     video_clip.close()
 except Exception as e:
-    print(f"Error loading video: {e}")
-    has_audio = False
+    print(f"Error loading audio: {e}")
+    import traceback
+    traceback.print_exc()
 
 # 동영상 재생
 cap = cv2.VideoCapture(video_path)
@@ -241,11 +246,6 @@ try:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
-            elif event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_q:
-                    running = False
-                elif event.key == pygame.K_F1:  # F1 키로 설정 열기
-                    settings_clicked = True
 
         # 설정 버튼 클릭 처리
         if settings_clicked:
@@ -276,7 +276,7 @@ try:
                 if has_audio:
                     pygame.mixer.music.stop()
                     pygame.mixer.music.unload()
-                    if os.path.exists(audio_path):
+                    if audio_path and os.path.exists(audio_path):
                         try:
                             os.unlink(audio_path)
                         except:
@@ -292,24 +292,31 @@ try:
                     # 새 오디오 추출
                     try:
                         video_clip = VideoFileClip(new_video_path)
-                        audio_file = tempfile.NamedTemporaryFile(delete=False, suffix='.mp3')
-                        audio_path = audio_file.name
-                        audio_file.close()
 
                         if video_clip.audio is not None:
+                            audio_file = tempfile.NamedTemporaryFile(delete=False, suffix='.mp3')
+                            audio_path = audio_file.name
+                            audio_file.close()
+
                             video_clip.audio.write_audiofile(audio_path, logger=None)
                             pygame.mixer.music.load(audio_path)
-                            pygame.mixer.music.set_volume(0 if muted else config.get_volume())
+                            volume = config.get_volume()
+                            pygame.mixer.music.set_volume(0 if muted else volume)
                             pygame.mixer.music.play(-1)
                             has_audio = True
+                            print(f"New video audio loaded. Muted: {muted}, Volume: {volume}")
                         else:
-                            print("No audio in video.")
+                            print("No audio in new video.")
                             has_audio = False
+                            audio_path = None
 
                         video_clip.close()
                     except Exception as e:
-                        print(f"Error loading audio: {e}")
+                        print(f"Error loading new video audio: {e}")
+                        import traceback
+                        traceback.print_exc()
                         has_audio = False
+                        audio_path = None
 
         # 아이콘 표시 타이머 체크
         current_time = time.time()
@@ -387,7 +394,7 @@ finally:
     pygame.quit()
 
     # 임시 오디오 파일 삭제
-    if has_audio and os.path.exists(audio_path):
+    if audio_path and os.path.exists(audio_path):
         try:
             os.unlink(audio_path)
         except:
