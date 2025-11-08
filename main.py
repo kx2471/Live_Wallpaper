@@ -116,15 +116,28 @@ mute_icon = pygame.transform.scale(mute_icon, (button_size, button_size))
 
 settings_icon = pygame.image.load(os.path.join(icon_dir, "setting.png")).convert_alpha()
 settings_icon = pygame.transform.scale(settings_icon, (button_size, button_size))
-mute_button_x = work_area_width - button_size - 20
+
+# 음량 조절바 설정
+volume_slider_width = 150
+volume_slider_height = 10
+volume_slider_x = work_area_width - volume_slider_width - 20
+volume_slider_y = work_area_height - 35
+
+# 버튼 위치 (음량 조절바 왼쪽으로 이동)
+mute_button_x = volume_slider_x - button_size - 20
 mute_button_y = work_area_height - button_size - 20
 
-settings_button_x = work_area_width - button_size * 2 - 30
+settings_button_x = mute_button_x - button_size - 10
 settings_button_y = work_area_height - button_size - 20
+
+# 음량 조절 상태
+current_volume = config.get_volume()
+dragging_volume = False
 
 # 마우스 클릭 감지 스레드
 def check_mouse_click():
     global mouse_clicked, muted, last_click_time, settings_clicked, show_icons, last_mouse_move_time, hovered_button
+    global current_volume, dragging_volume
     import time
 
     # 마우스 왼쪽 버튼 상태 확인 (VK_LBUTTON = 0x01)
@@ -140,11 +153,11 @@ def check_mouse_click():
         rel_x = x - rect.left
         rel_y = y - rect.top
 
-        # 아이콘 영역 정의 (두 버튼을 포함하는 영역)
+        # 아이콘 영역 정의 (버튼들과 음량 조절바를 포함하는 영역)
         icon_area_x = settings_button_x - 10
-        icon_area_y = mute_button_y - 10
-        icon_area_width = (mute_button_x + button_size) - icon_area_x + 10
-        icon_area_height = button_size + 20
+        icon_area_y = volume_slider_y - 10
+        icon_area_width = (volume_slider_x + volume_slider_width) - icon_area_x + 20
+        icon_area_height = button_size + 30
 
         # 마우스가 아이콘 영역에 있는지 확인
         if (icon_area_x <= rel_x <= icon_area_x + icon_area_width and
@@ -167,6 +180,21 @@ def check_mouse_click():
 
         # 현재 마우스 버튼 상태
         current_state = win32api.GetAsyncKeyState(VK_LBUTTON) & 0x8000
+
+        # 음량 조절바 드래그 처리
+        if current_state:
+            # 음량 조절바 영역 확인 (세로로 좀 더 넓게)
+            if (volume_slider_x <= rel_x <= volume_slider_x + volume_slider_width and
+                volume_slider_y - 10 <= rel_y <= volume_slider_y + volume_slider_height + 10):
+                dragging_volume = True
+                # 음량 계산 (0.0 ~ 1.0)
+                volume_ratio = (rel_x - volume_slider_x) / volume_slider_width
+                volume_ratio = max(0.0, min(1.0, volume_ratio))
+                current_volume = volume_ratio
+                config.set_volume(current_volume)
+                mouse_clicked = True  # 볼륨 업데이트 트리거
+        else:
+            dragging_volume = False
 
         # 버튼이 눌렸다가 떼어졌을 때 (클릭)
         if prev_state and not current_state:
@@ -256,16 +284,24 @@ try:
                 # 새 동영상이 선택되면 동영상 재로드
                 print(f"Video change requested: {result}")
                 reload_video = True
-            else:
-                print("Settings window closed without changes.")
 
-        # 음소거 상태가 변경되었으면 볼륨 조절
+            # 설정이 변경되었을 수 있으므로 볼륨과 mute 상태 다시 로드
+            new_volume = config.get_volume()
+            new_muted = config.get_muted()
+
+            if new_volume != current_volume or new_muted != muted:
+                current_volume = new_volume
+                muted = new_muted
+                mouse_clicked = True  # 볼륨 업데이트 트리거
+                print(f"Settings updated - Volume: {int(current_volume * 100)}%, Muted: {muted}")
+
+        # 음소거 상태 또는 볼륨이 변경되었으면 볼륨 조절
         if mouse_clicked:
             if has_audio:
                 if muted:
                     pygame.mixer.music.set_volume(0)
                 else:
-                    pygame.mixer.music.set_volume(config.get_volume())
+                    pygame.mixer.music.set_volume(current_volume)
             mouse_clicked = False
 
         # 동영상 재로드 처리
@@ -396,6 +432,34 @@ try:
                 screen.blit(scaled_icon, (settings_button_x + offset, settings_button_y + offset))
             else:
                 screen.blit(settings_icon, (settings_button_x, settings_button_y))
+
+            # 음량 조절바 렌더링
+            # 배경 바 (회색)
+            slider_bg_rect = pygame.Rect(volume_slider_x, volume_slider_y, volume_slider_width, volume_slider_height)
+            pygame.draw.rect(screen, (100, 100, 100), slider_bg_rect, border_radius=5)
+
+            # 채워진 부분 (흰색 또는 음소거 시 회색)
+            filled_width = int(volume_slider_width * current_volume)
+            if filled_width > 0:
+                filled_rect = pygame.Rect(volume_slider_x, volume_slider_y, filled_width, volume_slider_height)
+                if muted:
+                    pygame.draw.rect(screen, (150, 150, 150), filled_rect, border_radius=5)
+                else:
+                    pygame.draw.rect(screen, (255, 255, 255), filled_rect, border_radius=5)
+
+            # 슬라이더 핸들 (원형)
+            handle_x = volume_slider_x + filled_width
+            handle_y = volume_slider_y + volume_slider_height // 2
+            handle_radius = 8
+            pygame.draw.circle(screen, (255, 255, 255), (handle_x, handle_y), handle_radius)
+
+            # 음량 퍼센트 표시
+            font = pygame.font.Font(None, 24)
+            volume_percent = int(current_volume * 100)
+            volume_text = font.render(f"{volume_percent}%", True, (255, 255, 255))
+            text_rect = volume_text.get_rect()
+            text_rect.midleft = (volume_slider_x + volume_slider_width + 10, volume_slider_y + volume_slider_height // 2)
+            screen.blit(volume_text, text_rect)
 
         pygame.display.flip()
 
