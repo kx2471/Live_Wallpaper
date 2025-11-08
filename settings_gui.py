@@ -111,11 +111,12 @@ class SettingsWindow:
         browse_btn.pack(side=tk.LEFT)
 
         # 버튼 영역
-        button_frame = tk.Frame(self.root, bg='#f0f0f0')
-        button_frame.pack(pady=20)
+        self.button_frame = tk.Frame(self.root, bg='#f0f0f0')
+        self.button_frame.pack(pady=20)
 
+        # 배경화면 변경 버튼 (처음엔 생성만 하고 표시 안함)
         self.save_btn = tk.Button(
-            button_frame,
+            self.button_frame,
             text="🖼 배경화면 변경",
             command=self.change_video,
             width=18,
@@ -124,13 +125,13 @@ class SettingsWindow:
             fg="white",
             relief='flat',
             cursor='hand2',
-            pady=10,
-            state='disabled'  # 처음에는 비활성화
+            pady=10
         )
-        self.save_btn.pack(side=tk.LEFT, padx=5)
+        # 처음엔 pack하지 않음 (숨김)
 
-        cancel_btn = tk.Button(
-            button_frame,
+        # 취소 버튼 (항상 표시)
+        self.cancel_btn = tk.Button(
+            self.button_frame,
             text="✖ 취소",
             command=self.cancel,
             width=18,
@@ -141,7 +142,7 @@ class SettingsWindow:
             cursor='hand2',
             pady=10
         )
-        cancel_btn.pack(side=tk.LEFT, padx=5)
+        self.cancel_btn.pack(side=tk.LEFT, padx=5)
 
     def browse_file(self):
         """비디오 파일을 선택합니다."""
@@ -159,8 +160,12 @@ class SettingsWindow:
             self.selected_video = filename
             video_name = os.path.basename(filename)
             self.file_label.config(text=video_name)
-            # 동영상 선택 시 버튼 활성화
-            self.save_btn.config(state='normal', cursor='hand2')
+
+            # 동영상 선택 시 버튼 표시
+            self.save_btn.pack(side=tk.LEFT, padx=5)
+            # 취소 버튼을 오른쪽으로 재배치
+            self.cancel_btn.pack_forget()
+            self.cancel_btn.pack(side=tk.LEFT, padx=5)
 
     def change_video(self):
         """동영상을 변경합니다."""
