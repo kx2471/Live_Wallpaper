@@ -1,0 +1,52 @@
+# 동영상 파일
+*.mp4
+*.avi
+*.mkv
+*.mov
+*.wmv
+
+# 빌드 결과물
+build/
+dist/
+*.spec
+
+# PyInstaller
+*.exe
+*.app
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# 설정 파일
+wallpaper_config.json
+
+# 임시 파일
+*.tmp
+*.temp
+*.mp3
+
+# IDE
+.vscode/
+.idea/
+.vs/
+.claude/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 로그
+*.log
