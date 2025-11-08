@@ -116,8 +116,8 @@ class SettingsWindow:
 
         save_btn = tk.Button(
             button_frame,
-            text="✔ 저장하고 적용",
-            command=self.save_settings,
+            text="🔄 동영상 변경",
+            command=self.change_video,
             width=18,
             font=("맑은 고딕", 11, "bold"),
             bg="#4CAF50",
@@ -159,10 +159,10 @@ class SettingsWindow:
             video_name = os.path.basename(filename)
             self.file_label.config(text=video_name)
 
-    def save_settings(self):
-        """설정을 저장합니다."""
+    def change_video(self):
+        """동영상을 변경합니다."""
         if not self.selected_video:
-            messagebox.showwarning("경고", "동영상 파일을 선택해주세요.")
+            messagebox.showwarning("동영상 선택 필요", "새로운 동영상 파일을 먼저 선택해주세요.\n\n'📁 찾아보기' 버튼을 눌러 동영상을 선택하세요.")
             return
 
         if not os.path.exists(self.selected_video):
@@ -172,7 +172,8 @@ class SettingsWindow:
         # 설정 저장
         if config.set_video_path(self.selected_video):
             self.result = self.selected_video
-            messagebox.showinfo("완료", "설정이 저장되었습니다.\n새 동영상이 곧 재생됩니다.")
+            video_name = os.path.basename(self.selected_video)
+            messagebox.showinfo("변경 완료", f"동영상이 변경되었습니다!\n\n📹 {video_name}\n\n새로운 동영상이 곧 재생됩니다.")
             self.root.destroy()
         else:
             messagebox.showerror("오류", "설정 저장에 실패했습니다.")

@@ -250,11 +250,14 @@ try:
         # 설정 버튼 클릭 처리
         if settings_clicked:
             settings_clicked = False
+            print("Opening settings window...")
             result = settings_gui.show_settings_window()
             if result:
                 # 새 동영상이 선택되면 동영상 재로드
-                print(f"Loading new video: {result}")
+                print(f"Video change requested: {result}")
                 reload_video = True
+            else:
+                print("Settings window closed without changes.")
 
         # 음소거 상태가 변경되었으면 볼륨 조절
         if mouse_clicked:
@@ -271,7 +274,12 @@ try:
             new_video_path = config.get_video_path()
 
             if new_video_path and os.path.exists(new_video_path):
+                print(f"\n{'='*50}")
+                print(f"Changing video to: {os.path.basename(new_video_path)}")
+                print(f"{'='*50}")
+
                 # 기존 리소스 정리
+                print("Releasing current video resources...")
                 cap.release()
                 if has_audio:
                     pygame.mixer.music.stop()
@@ -279,18 +287,21 @@ try:
                     if audio_path and os.path.exists(audio_path):
                         try:
                             os.unlink(audio_path)
+                            print("Temporary audio file deleted.")
                         except:
                             pass
 
                 # 새 동영상 로드
-                print(f"Loading video: {new_video_path}")
+                print(f"Loading new video: {new_video_path}")
                 cap = cv2.VideoCapture(new_video_path)
 
                 if not cap.isOpened():
-                    print(f"Failed to open video: {new_video_path}")
+                    print(f"ERROR: Failed to open video: {new_video_path}")
                 else:
+                    print("Video loaded successfully!")
                     # 새 오디오 추출
                     try:
+                        print("Extracting audio from new video...")
                         video_clip = VideoFileClip(new_video_path)
 
                         if video_clip.audio is not None:
@@ -304,19 +315,24 @@ try:
                             pygame.mixer.music.set_volume(0 if muted else volume)
                             pygame.mixer.music.play(-1)
                             has_audio = True
-                            print(f"New video audio loaded. Muted: {muted}, Volume: {volume}")
+                            print(f"Audio loaded successfully! (Muted: {muted}, Volume: {volume})")
                         else:
-                            print("No audio in new video.")
+                            print("No audio track found in new video.")
                             has_audio = False
                             audio_path = None
 
                         video_clip.close()
+                        print(f"{'='*50}")
+                        print("Video change completed successfully!")
+                        print(f"{'='*50}\n")
                     except Exception as e:
-                        print(f"Error loading new video audio: {e}")
+                        print(f"ERROR: Failed to load audio from new video: {e}")
                         import traceback
                         traceback.print_exc()
                         has_audio = False
                         audio_path = None
+            else:
+                print(f"ERROR: Video file not found: {new_video_path}")
 
         # 아이콘 표시 타이머 체크
         current_time = time.time()
