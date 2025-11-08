@@ -161,11 +161,16 @@ class SettingsWindow:
             video_name = os.path.basename(filename)
             self.file_label.config(text=video_name)
 
-            # 동영상 선택 시 버튼 표시
-            self.save_btn.pack(side=tk.LEFT, padx=5)
-            # 취소 버튼을 오른쪽으로 재배치
+            print(f"[DEBUG] Video selected: {video_name}")
+
+            # 취소 버튼을 먼저 제거
             self.cancel_btn.pack_forget()
+            # 배경화면 변경 버튼 표시
+            self.save_btn.pack(side=tk.LEFT, padx=5)
+            # 취소 버튼을 다시 추가 (오른쪽에 배치)
             self.cancel_btn.pack(side=tk.LEFT, padx=5)
+
+            print("[DEBUG] Buttons repacked: [배경화면 변경] [취소]")
 
     def change_video(self):
         """동영상을 변경합니다."""
