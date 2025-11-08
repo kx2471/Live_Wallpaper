@@ -4,13 +4,14 @@
 import tkinter as tk
 from tkinter import filedialog, messagebox
 import config
+import setup_autostart
 import os
 
 class SettingsWindow:
     def __init__(self, parent=None):
         self.root = tk.Tk() if parent is None else tk.Toplevel(parent)
         self.root.title("Wallpaper Player - 설정")
-        self.root.geometry("600x650")
+        self.root.geometry("600x720")
         self.root.resizable(False, False)
         self.root.configure(bg='#f0f0f0')
 
@@ -24,6 +25,7 @@ class SettingsWindow:
         self.original_volume = config.get_volume()
         self.original_muted = config.get_muted()
         self.original_opacity = config.get_icon_opacity()
+        self.original_autostart = config.get_autostart()
 
         self.create_widgets()
         self.center_window()
@@ -43,11 +45,11 @@ class SettingsWindow:
         title_label = tk.Label(
             self.root,
             text="🎬 배경화면 동영상 설정",
-            font=("맑은 고딕", 16, "bold"),
+            font=("맑은 고딕", 14, "bold"),
             bg='#f0f0f0',
             fg='#333333'
         )
-        title_label.pack(pady=20)
+        title_label.pack(pady=10)
 
         # 현재 설정된 비디오 표시
         current_video = config.get_video_path()
@@ -55,38 +57,38 @@ class SettingsWindow:
             video_name = os.path.basename(current_video)
 
             current_frame = tk.Frame(self.root, bg='#e8f4f8', relief='groove', borderwidth=2)
-            current_frame.pack(pady=10, padx=30, fill='x')
+            current_frame.pack(pady=5, padx=30, fill='x')
 
             current_title = tk.Label(
                 current_frame,
                 text="📂 현재 동영상:",
-                font=("맑은 고딕", 10, "bold"),
+                font=("맑은 고딕", 9, "bold"),
                 bg='#e8f4f8',
                 fg='#0066cc'
             )
-            current_title.pack(anchor='w', padx=10, pady=(5, 0))
+            current_title.pack(anchor='w', padx=8, pady=(3, 0))
 
             current_label = tk.Label(
                 current_frame,
                 text=video_name,
-                font=("맑은 고딕", 9),
+                font=("맑은 고딕", 8),
                 bg='#e8f4f8',
                 fg='#666666'
             )
-            current_label.pack(anchor='w', padx=10, pady=(0, 5))
+            current_label.pack(anchor='w', padx=8, pady=(0, 3))
 
         # 파일 선택 영역
         file_frame = tk.Frame(self.root, bg='#f0f0f0')
-        file_frame.pack(pady=20, padx=30)
+        file_frame.pack(pady=8, padx=30)
 
         select_label = tk.Label(
             file_frame,
             text="🎥 새 동영상 선택:",
-            font=("맑은 고딕", 11, "bold"),
+            font=("맑은 고딕", 9, "bold"),
             bg='#f0f0f0',
             fg='#333333'
         )
-        select_label.pack(anchor='w', pady=(0, 5))
+        select_label.pack(anchor='w', pady=(0, 3))
 
         input_frame = tk.Frame(file_frame, bg='#f0f0f0')
         input_frame.pack(fill='x')
@@ -98,42 +100,42 @@ class SettingsWindow:
             anchor="w",
             relief="sunken",
             bg='white',
-            font=("맑은 고딕", 9),
-            padx=10,
-            pady=8
+            font=("맑은 고딕", 8),
+            padx=8,
+            pady=5
         )
-        self.file_label.pack(side=tk.LEFT, padx=(0, 10))
+        self.file_label.pack(side=tk.LEFT, padx=(0, 8))
 
         browse_btn = tk.Button(
             input_frame,
             text="📁 찾아보기",
             command=self.browse_file,
             width=12,
-            font=("맑은 고딕", 10, "bold"),
+            font=("맑은 고딕", 9, "bold"),
             bg='#0078d4',
             fg='white',
             relief='flat',
             cursor='hand2',
-            pady=8
+            pady=5
         )
         browse_btn.pack(side=tk.LEFT)
 
         # 구분선
         separator1 = tk.Frame(self.root, bg='#cccccc', height=1)
-        separator1.pack(pady=15, padx=30, fill='x')
+        separator1.pack(pady=8, padx=30, fill='x')
 
         # 음량 설정 영역
         volume_frame = tk.Frame(self.root, bg='#f0f0f0')
-        volume_frame.pack(pady=10, padx=30, fill='x')
+        volume_frame.pack(pady=5, padx=30, fill='x')
 
         volume_title = tk.Label(
             volume_frame,
             text="🔊 음량 설정",
-            font=("맑은 고딕", 11, "bold"),
+            font=("맑은 고딕", 9, "bold"),
             bg='#f0f0f0',
             fg='#333333'
         )
-        volume_title.pack(anchor='w', pady=(0, 5))
+        volume_title.pack(anchor='w', pady=(0, 3))
 
         # 현재 볼륨 값 가져오기 (0.0~1.0을 1~100으로 변환)
         current_volume = config.get_volume()
@@ -141,18 +143,18 @@ class SettingsWindow:
 
         # 음량 슬라이더와 값 표시
         volume_slider_frame = tk.Frame(volume_frame, bg='#f0f0f0')
-        volume_slider_frame.pack(fill='x', pady=5)
+        volume_slider_frame.pack(fill='x', pady=3)
 
         self.volume_value_label = tk.Label(
             volume_slider_frame,
             text=f"음량: {volume_percent}%",
-            font=("맑은 고딕", 10),
+            font=("맑은 고딕", 9),
             bg='#f0f0f0',
             fg='#333333',
-            width=12,
+            width=10,
             anchor='w'
         )
-        self.volume_value_label.pack(side=tk.LEFT, padx=(0, 10))
+        self.volume_value_label.pack(side=tk.LEFT, padx=(0, 8))
 
         self.volume_slider = tk.Scale(
             volume_slider_frame,
@@ -162,7 +164,7 @@ class SettingsWindow:
             bg='#f0f0f0',
             fg='#333333',
             highlightthickness=0,
-            length=400,
+            length=380,
             command=self.on_volume_change
         )
         self.volume_slider.set(volume_percent)
@@ -170,7 +172,7 @@ class SettingsWindow:
 
         # Mute 체크박스
         mute_frame = tk.Frame(volume_frame, bg='#f0f0f0')
-        mute_frame.pack(anchor='w', pady=5)
+        mute_frame.pack(anchor='w', pady=3)
 
         current_muted = config.get_muted()
         self.mute_var = tk.BooleanVar(value=current_muted)
@@ -178,7 +180,7 @@ class SettingsWindow:
             mute_frame,
             text="🔇 음소거",
             variable=self.mute_var,
-            font=("맑은 고딕", 10),
+            font=("맑은 고딕", 9),
             bg='#f0f0f0',
             fg='#333333',
             activebackground='#f0f0f0',
@@ -188,38 +190,38 @@ class SettingsWindow:
 
         # 구분선
         separator2 = tk.Frame(self.root, bg='#cccccc', height=1)
-        separator2.pack(pady=15, padx=30, fill='x')
+        separator2.pack(pady=8, padx=30, fill='x')
 
         # 아이콘 투명도 설정 영역
         opacity_frame = tk.Frame(self.root, bg='#f0f0f0')
-        opacity_frame.pack(pady=10, padx=30, fill='x')
+        opacity_frame.pack(pady=5, padx=30, fill='x')
 
         opacity_title = tk.Label(
             opacity_frame,
             text="👁 아이콘 투명도 설정",
-            font=("맑은 고딕", 11, "bold"),
+            font=("맑은 고딕", 9, "bold"),
             bg='#f0f0f0',
             fg='#333333'
         )
-        opacity_title.pack(anchor='w', pady=(0, 5))
+        opacity_title.pack(anchor='w', pady=(0, 3))
 
         # 현재 투명도 값 가져오기
         current_opacity = config.get_icon_opacity()
 
         # 투명도 슬라이더와 값 표시
         opacity_slider_frame = tk.Frame(opacity_frame, bg='#f0f0f0')
-        opacity_slider_frame.pack(fill='x', pady=5)
+        opacity_slider_frame.pack(fill='x', pady=3)
 
         self.opacity_value_label = tk.Label(
             opacity_slider_frame,
             text=f"투명도: {current_opacity}%",
-            font=("맑은 고딕", 10),
+            font=("맑은 고딕", 9),
             bg='#f0f0f0',
             fg='#333333',
-            width=12,
+            width=10,
             anchor='w'
         )
-        self.opacity_value_label.pack(side=tk.LEFT, padx=(0, 10))
+        self.opacity_value_label.pack(side=tk.LEFT, padx=(0, 8))
 
         self.opacity_slider = tk.Scale(
             opacity_slider_frame,
@@ -229,7 +231,7 @@ class SettingsWindow:
             bg='#f0f0f0',
             fg='#333333',
             highlightthickness=0,
-            length=400,
+            length=380,
             command=self.on_opacity_change
         )
         self.opacity_slider.set(current_opacity)
@@ -239,60 +241,102 @@ class SettingsWindow:
         opacity_desc = tk.Label(
             opacity_frame,
             text="※ 0%는 약간 투명, 100%는 완전 불투명",
-            font=("맑은 고딕", 8),
+            font=("맑은 고딕", 7),
             bg='#f0f0f0',
             fg='#666666'
         )
-        opacity_desc.pack(anchor='w', pady=(0, 5))
+        opacity_desc.pack(anchor='w', pady=(0, 3))
+
+        # 구분선
+        separator3 = tk.Frame(self.root, bg='#cccccc', height=1)
+        separator3.pack(pady=8, padx=30, fill='x')
+
+        # 자동시작 설정 영역
+        autostart_frame = tk.Frame(self.root, bg='#f0f0f0')
+        autostart_frame.pack(pady=5, padx=30, fill='x')
+
+        autostart_title = tk.Label(
+            autostart_frame,
+            text="⚙ 시작 프로그램 설정",
+            font=("맑은 고딕", 9, "bold"),
+            bg='#f0f0f0',
+            fg='#333333'
+        )
+        autostart_title.pack(anchor='w', pady=(0, 3))
+
+        # 자동시작 체크박스
+        current_autostart = config.get_autostart()
+        self.autostart_var = tk.BooleanVar(value=current_autostart)
+        self.autostart_checkbox = tk.Checkbutton(
+            autostart_frame,
+            text="⏰ Windows 시작 시 자동 실행",
+            variable=self.autostart_var,
+            font=("맑은 고딕", 9),
+            bg='#f0f0f0',
+            fg='#333333',
+            activebackground='#f0f0f0',
+            selectcolor='white'
+        )
+        self.autostart_checkbox.pack(anchor='w', pady=3)
+
+        # 설명 텍스트
+        autostart_desc = tk.Label(
+            autostart_frame,
+            text="※ 체크하고 저장 버튼을 눌러야 적용됩니다",
+            font=("맑은 고딕", 7),
+            bg='#f0f0f0',
+            fg='#666666'
+        )
+        autostart_desc.pack(anchor='w', pady=(0, 3))
 
         # 버튼 영역
         button_frame = tk.Frame(self.root, bg='#f0f0f0')
-        button_frame.pack(pady=20)
+        button_frame.pack(pady=12)
 
         # 저장 버튼 (비디오 변경 + 설정 저장 통합)
         save_settings_btn = tk.Button(
             button_frame,
             text="💾 저장",
             command=self.save_settings,
-            width=13,
-            font=("맑은 고딕", 11, "bold"),
+            width=11,
+            font=("맑은 고딕", 9, "bold"),
             bg='#4CAF50',
             fg='white',
             relief='flat',
             cursor='hand2',
-            pady=10
+            pady=6
         )
-        save_settings_btn.pack(side=tk.LEFT, padx=5)
+        save_settings_btn.pack(side=tk.LEFT, padx=4)
 
         # 취소 버튼
         cancel_btn = tk.Button(
             button_frame,
             text="✖ 취소",
             command=self.cancel,
-            width=13,
-            font=("맑은 고딕", 11, "bold"),
+            width=11,
+            font=("맑은 고딕", 9, "bold"),
             bg='#757575',
             fg='white',
             relief='flat',
             cursor='hand2',
-            pady=10
+            pady=6
         )
-        cancel_btn.pack(side=tk.LEFT, padx=5)
+        cancel_btn.pack(side=tk.LEFT, padx=4)
 
         # 종료 버튼
         quit_btn = tk.Button(
             button_frame,
             text="🚪 종료",
             command=self.quit_application,
-            width=13,
-            font=("맑은 고딕", 11, "bold"),
+            width=11,
+            font=("맑은 고딕", 9, "bold"),
             bg='#f44336',
             fg='white',
             relief='flat',
             cursor='hand2',
-            pady=10
+            pady=6
         )
-        quit_btn.pack(side=tk.LEFT, padx=5)
+        quit_btn.pack(side=tk.LEFT, padx=4)
 
     def on_volume_change(self, value):
         """볼륨 슬라이더가 변경될 때 실시간으로 적용합니다."""
@@ -329,10 +373,11 @@ class SettingsWindow:
             self.file_label.config(text=video_name)
 
     def save_settings(self):
-        """음량, mute, 투명도, 비디오 설정을 저장합니다."""
+        """음량, mute, 투명도, 자동시작, 비디오 설정을 저장합니다."""
         # 슬라이더에서 현재 값 가져오기
         volume_value = self.volume_slider.get()
         opacity_value = self.opacity_slider.get()
+        autostart_value = self.autostart_var.get()
 
         # 0.0~1.0 범위로 변환
         volume_ratio = volume_value / 100.0
@@ -341,6 +386,13 @@ class SettingsWindow:
         config.set_volume(volume_ratio)
         config.set_muted(self.mute_var.get())
         config.set_icon_opacity(opacity_value)
+        config.set_autostart(autostart_value)
+
+        # 자동시작 설정 적용
+        if autostart_value:
+            setup_autostart.add_to_startup()
+        else:
+            setup_autostart.remove_from_startup()
 
         self.volume_changed = True
         self.mute_changed = True
@@ -354,9 +406,9 @@ class SettingsWindow:
             config.set_video_path(self.selected_video)
             self.result = self.selected_video
             video_name = os.path.basename(self.selected_video)
-            messagebox.showinfo("저장 완료", f"설정이 저장되었습니다!\n\n음량: {volume_value}%\n음소거: {'예' if self.mute_var.get() else '아니오'}\n아이콘 투명도: {opacity_value}%\n\n배경화면: {video_name}")
+            messagebox.showinfo("저장 완료", f"설정이 저장되었습니다!\n\n음량: {volume_value}%\n음소거: {'예' if self.mute_var.get() else '아니오'}\n아이콘 투명도: {opacity_value}%\n자동 시작: {'예' if autostart_value else '아니오'}\n\n배경화면: {video_name}")
         else:
-            messagebox.showinfo("저장 완료", f"설정이 저장되었습니다!\n\n음량: {volume_value}%\n음소거: {'예' if self.mute_var.get() else '아니오'}\n아이콘 투명도: {opacity_value}%")
+            messagebox.showinfo("저장 완료", f"설정이 저장되었습니다!\n\n음량: {volume_value}%\n음소거: {'예' if self.mute_var.get() else '아니오'}\n아이콘 투명도: {opacity_value}%\n자동 시작: {'예' if autostart_value else '아니오'}")
 
         self.root.destroy()
 
@@ -366,6 +418,7 @@ class SettingsWindow:
         config.set_volume(self.original_volume)
         config.set_muted(self.original_muted)
         config.set_icon_opacity(self.original_opacity)
+        config.set_autostart(self.original_autostart)
 
         self.root.destroy()
 

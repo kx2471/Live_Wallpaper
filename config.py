@@ -10,7 +10,8 @@ DEFAULT_CONFIG = {
     "video_path": None,
     "volume": 1.0,
     "muted": False,
-    "icon_opacity": 100  # 0-100 (사용자에게 표시되는 값, 실제로는 20-100%가 적용됨)
+    "icon_opacity": 100,  # 0-100 (사용자에게 표시되는 값, 실제로는 20-100%가 적용됨)
+    "autostart": False  # 윈도우 시작시 자동 실행
 }
 
 def load_config():
@@ -85,3 +86,14 @@ def get_actual_icon_opacity():
     user_value = get_icon_opacity()
     # 사용자 값 0-100을 실제 투명도 20-100%로 변환
     return 0.2 + (user_value / 100.0) * 0.8
+
+def get_autostart():
+    """자동 시작 설정을 반환합니다."""
+    config = load_config()
+    return config.get("autostart", False)
+
+def set_autostart(autostart):
+    """자동 시작 설정을 저장합니다."""
+    config = load_config()
+    config["autostart"] = autostart
+    return save_config(config)

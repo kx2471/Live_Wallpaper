@@ -275,7 +275,7 @@ def check_mouse_click():
                         last_click_time = current_time
 
         prev_state = current_state
-        time.sleep(0.01)  # CPU 사용률 줄이기
+        time.sleep(0.016)  # CPU 사용률 줄이기 (~60Hz, 충분히 반응적)
 
 # 마우스 감지 스레드 시작
 mouse_thread = threading.Thread(target=check_mouse_click, daemon=True)
@@ -337,6 +337,14 @@ try:
             # 설정 창이 이미 열려있지 않으면 새로 열기
             if settings_window is None or not settings_window.is_open():
                 print("Opening settings window...")
+
+                # 오디오/비디오 싱크 문제 해결: 설정 창 열 때 처음부터 재시작
+                print("Restarting video and audio for sync...")
+                cap.set(cv2.CAP_PROP_POS_FRAMES, 0)  # 비디오 처음으로
+                if has_audio:
+                    pygame.mixer.music.rewind()  # 오디오 처음으로
+                print("Video and audio restarted successfully")
+
                 settings_window = settings_gui.show_settings_window()
 
         # 설정 창이 열려있으면 업데이트
@@ -485,10 +493,12 @@ try:
             continue
 
         # OpenCV는 BGR, pygame은 RGB 사용
+        # INTER_LINEAR: 빠르고 품질도 좋은 보간 방법 (기본값이지만 명시적으로 설정)
         frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        frame = cv2.resize(frame, (work_area_width, work_area_height))
+        frame = cv2.resize(frame, (work_area_width, work_area_height), interpolation=cv2.INTER_LINEAR)
 
         # numpy 배열을 pygame surface로 변환
+        # swapaxes는 view를 반환하므로 메모리 복사 없음
         frame = frame.swapaxes(0, 1)  # (height, width, 3) -> (width, height, 3)
         surface = pygame.surfarray.make_surface(frame)
 

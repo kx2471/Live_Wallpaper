@@ -61,6 +61,28 @@ def remove_from_startup():
         print(f"✗ 시작 프로그램 제거 실패: {e}")
         return False
 
+def is_in_startup():
+    """시작 프로그램에 등록되어 있는지 확인"""
+    key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
+    app_name = "WallpaperPlayer"
+
+    try:
+        # 레지스트리 키 열기
+        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_READ)
+
+        # 값 읽기 시도
+        try:
+            value, _ = winreg.QueryValueEx(key, app_name)
+            winreg.CloseKey(key)
+            return True
+        except FileNotFoundError:
+            winreg.CloseKey(key)
+            return False
+
+    except Exception as e:
+        print(f"레지스트리 확인 실패: {e}")
+        return False
+
 if __name__ == "__main__":
     print("=" * 50)
     print("Wallpaper Player - 시작 프로그램 설정")
