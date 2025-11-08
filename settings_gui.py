@@ -114,9 +114,9 @@ class SettingsWindow:
         button_frame = tk.Frame(self.root, bg='#f0f0f0')
         button_frame.pack(pady=20)
 
-        save_btn = tk.Button(
+        self.save_btn = tk.Button(
             button_frame,
-            text="🔄 동영상 변경",
+            text="🖼 배경화면 변경",
             command=self.change_video,
             width=18,
             font=("맑은 고딕", 11, "bold"),
@@ -124,9 +124,10 @@ class SettingsWindow:
             fg="white",
             relief='flat',
             cursor='hand2',
-            pady=10
+            pady=10,
+            state='disabled'  # 처음에는 비활성화
         )
-        save_btn.pack(side=tk.LEFT, padx=5)
+        self.save_btn.pack(side=tk.LEFT, padx=5)
 
         cancel_btn = tk.Button(
             button_frame,
@@ -158,6 +159,8 @@ class SettingsWindow:
             self.selected_video = filename
             video_name = os.path.basename(filename)
             self.file_label.config(text=video_name)
+            # 동영상 선택 시 버튼 활성화
+            self.save_btn.config(state='normal', cursor='hand2')
 
     def change_video(self):
         """동영상을 변경합니다."""
