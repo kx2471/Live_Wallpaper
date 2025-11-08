@@ -1,0 +1,5 @@
+opencv-python>=4.8.0
+pygame>=2.5.0
+moviepy>=1.0.3
+pywin32>=306
+pyinstaller>=6.0.0
