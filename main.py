@@ -4,17 +4,23 @@ import win32gui
 import win32con
 import win32api
 import ctypes
-import tempfile
 import os
 import threading
 import sys
-from moviepy.editor import VideoFileClip
 import config
 import settings_gui
 
+# ffpyplayer import
+try:
+    from ffpyplayer.player import MediaPlayer
+except ImportError:
+    print("ERROR: ffpyplayer not installed. Installing...")
+    import subprocess
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "ffpyplayer"])
+    from ffpyplayer.player import MediaPlayer
+
 # pygame 초기화
 pygame.init()
-pygame.mixer.init()
 
 # 첫 실행 확인 및 동영상 선택
 video_path = config.get_video_path()
@@ -225,45 +231,23 @@ def check_mouse_click():
 mouse_thread = threading.Thread(target=check_mouse_click, daemon=True)
 mouse_thread.start()
 
-# 동영상에서 오디오 추출
-print("Extracting audio...")
-audio_path = None
-has_audio = False
-
-try:
-    video_clip = VideoFileClip(video_path)
-
-    if video_clip.audio is not None:
-        audio_file = tempfile.NamedTemporaryFile(delete=False, suffix='.mp3')
-        audio_path = audio_file.name
-        audio_file.close()
-
-        video_clip.audio.write_audiofile(audio_path, logger=None)
-        pygame.mixer.music.load(audio_path)
-
-        # 저장된 볼륨 적용
-        volume = config.get_volume()
-        pygame.mixer.music.set_volume(0 if muted else volume)
-
-        pygame.mixer.music.play(-1)  # 무한 반복
-        has_audio = True
-        print(f"Audio loaded successfully. Muted: {muted}, Volume: {volume}")
-    else:
-        print("No audio in video.")
-
-    video_clip.close()
-except Exception as e:
-    print(f"Error loading audio: {e}")
-    import traceback
-    traceback.print_exc()
-
-# 동영상 재생
+# 동영상 및 오디오 재생 준비
+print("Loading video with audio...")
 cap = cv2.VideoCapture(video_path)
 
 if not cap.isOpened():
     print(f"Failed to open video: {video_path}")
     pygame.quit()
     sys.exit(1)
+
+# ffpyplayer로 오디오 재생 (비디오와 동기화)
+audio_player = MediaPlayer(video_path)
+has_audio = True
+
+# 초기 볼륨 설정
+initial_volume = 0.0 if muted else current_volume
+audio_player.set_volume(initial_volume)
+print(f"Audio player initialized. Muted: {muted}, Volume: {int(current_volume * 100)}%")
 
 # 비디오 FPS 가져오기
 video_fps = cap.get(cv2.CAP_PROP_FPS)
@@ -280,11 +264,6 @@ print(f"Video duration: {video_duration:.2f} seconds ({total_frames} frames)")
 
 clock = pygame.time.Clock()
 running = True
-
-# 동기화를 위한 시작 시간 기록
-video_start_time = time.time()
-sync_check_interval = 5.0  # 5초마다 동기화 체크
-last_sync_check = video_start_time
 
 try:
     import time
@@ -315,11 +294,11 @@ try:
 
         # 음소거 상태 또는 볼륨이 변경되었으면 볼륨 조절
         if mouse_clicked:
-            if has_audio:
+            if has_audio and audio_player:
                 if muted:
-                    pygame.mixer.music.set_volume(0)
+                    audio_player.set_volume(0.0)
                 else:
-                    pygame.mixer.music.set_volume(current_volume)
+                    audio_player.set_volume(current_volume)
             mouse_clicked = False
 
         # 동영상 재로드 처리
@@ -335,15 +314,8 @@ try:
                 # 기존 리소스 정리
                 print("Releasing current video resources...")
                 cap.release()
-                if has_audio:
-                    pygame.mixer.music.stop()
-                    pygame.mixer.music.unload()
-                    if audio_path and os.path.exists(audio_path):
-                        try:
-                            os.unlink(audio_path)
-                            print("Temporary audio file deleted.")
-                        except:
-                            pass
+                if has_audio and audio_player:
+                    audio_player.close_player()
 
                 # 새 동영상 로드
                 print(f"Loading new video: {new_video_path}")
@@ -366,33 +338,15 @@ try:
                     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
                     video_duration = total_frames / video_fps if video_fps > 0 else 0
                     print(f"New video duration: {video_duration:.2f} seconds ({total_frames} frames)")
-                    # 새 오디오 추출
+
+                    # 새 오디오 플레이어 생성
                     try:
-                        print("Extracting audio from new video...")
-                        video_clip = VideoFileClip(new_video_path)
-
-                        if video_clip.audio is not None:
-                            audio_file = tempfile.NamedTemporaryFile(delete=False, suffix='.mp3')
-                            audio_path = audio_file.name
-                            audio_file.close()
-
-                            video_clip.audio.write_audiofile(audio_path, logger=None)
-                            pygame.mixer.music.load(audio_path)
-                            volume = config.get_volume()
-                            pygame.mixer.music.set_volume(0 if muted else volume)
-                            pygame.mixer.music.play(-1)
-                            has_audio = True
-                            print(f"Audio loaded successfully! (Muted: {muted}, Volume: {volume})")
-
-                            # 새 동영상 시작 시간 재설정
-                            video_start_time = time.time()
-                            last_sync_check = video_start_time
-                        else:
-                            print("No audio track found in new video.")
-                            has_audio = False
-                            audio_path = None
-
-                        video_clip.close()
+                        print("Loading audio from new video...")
+                        audio_player = MediaPlayer(new_video_path)
+                        volume = config.get_volume()
+                        audio_player.set_volume(0.0 if muted else volume)
+                        has_audio = True
+                        print(f"Audio loaded successfully! (Muted: {muted}, Volume: {volume})")
                         print(f"{'='*50}")
                         print("Video change completed successfully!")
                         print(f"{'='*50}\n")
@@ -401,7 +355,7 @@ try:
                         import traceback
                         traceback.print_exc()
                         has_audio = False
-                        audio_path = None
+                        audio_player = None
             else:
                 print(f"ERROR: Video file not found: {new_video_path}")
 
@@ -413,42 +367,19 @@ try:
         ret, frame = cap.read()
         if not ret:
             # 영상이 끝났으므로 비디오와 오디오 모두 재시작
+            print("Video ended, looping...")
             cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-            if has_audio:
-                pygame.mixer.music.stop()
-                pygame.mixer.music.play(-1)
-                print("Video loop: Restarting audio for sync")
-            # 시작 시간 재설정
-            video_start_time = time.time()
-            last_sync_check = video_start_time
+            if has_audio and audio_player:
+                # 오디오 플레이어 재시작
+                audio_player.close_player()
+                audio_player = MediaPlayer(video_path)
+                audio_player.set_volume(0.0 if muted else current_volume)
             continue
 
-        # 주기적인 동기화 체크 (5초마다)
-        current_time = time.time()
-        if has_audio and current_time - last_sync_check >= sync_check_interval:
-            # 비디오의 현재 재생 시간 계산 (초 단위)
-            current_frame = cap.get(cv2.CAP_PROP_POS_FRAMES)
-            video_position = current_frame / video_fps
-
-            # 실제 경과 시간
-            elapsed_time = current_time - video_start_time
-            elapsed_time_in_video = elapsed_time % video_duration  # 루프 고려
-
-            # 시간 차이 계산
-            time_diff = abs(video_position - elapsed_time_in_video)
-
-            # 0.5초 이상 차이나면 동기화 조정
-            if time_diff > 0.5:
-                print(f"Sync check: Video at {video_position:.2f}s, Expected {elapsed_time_in_video:.2f}s (diff: {time_diff:.2f}s)")
-                # 오디오 재시작으로 동기화
-                pygame.mixer.music.stop()
-                pygame.mixer.music.play(-1)
-                # 비디오 위치도 조정
-                target_frame = int(elapsed_time_in_video * video_fps)
-                cap.set(cv2.CAP_PROP_POS_FRAMES, target_frame)
-                print(f"Resynced: Adjusted to frame {target_frame}")
-
-            last_sync_check = current_time
+        # ffpyplayer 오디오 동기화 (오디오 버퍼 처리)
+        if has_audio and audio_player:
+            audio_frame, val = audio_player.get_frame()
+            # 오디오 프레임이 있으면 자동으로 재생됨
 
         # OpenCV는 BGR, pygame은 RGB 사용
         frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -540,13 +471,6 @@ except KeyboardInterrupt:
     print("Program terminated by user.")
 finally:
     cap.release()
-    if has_audio:
-        pygame.mixer.music.stop()
+    if has_audio and audio_player:
+        audio_player.close_player()
     pygame.quit()
-
-    # 임시 오디오 파일 삭제
-    if audio_path and os.path.exists(audio_path):
-        try:
-            os.unlink(audio_path)
-        except:
-            pass
