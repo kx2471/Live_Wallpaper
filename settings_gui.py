@@ -10,7 +10,7 @@ class SettingsWindow:
     def __init__(self, parent=None):
         self.root = tk.Tk() if parent is None else tk.Toplevel(parent)
         self.root.title("Wallpaper Player - 설정")
-        self.root.geometry("600x300")
+        self.root.geometry("600x450")
         self.root.resizable(False, False)
         self.root.configure(bg='#f0f0f0')
 
