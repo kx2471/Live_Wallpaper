@@ -513,10 +513,11 @@ try:
 
         ret, frame = cap.read()
         if not ret:
-            # 영상이 끝났으므로 비디오 재시작
-            # 오디오는 이미 무한 반복 재생 중 (loops=-1)
+            # 영상이 끝났으므로 비디오와 오디오를 동시에 재시작 (싱크 유지)
             print("Video ended, looping...")
             cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+            if has_audio:
+                pygame.mixer.music.rewind()  # 오디오도 처음부터 재시작
             continue
 
         # OpenCV는 BGR, pygame은 RGB 사용
