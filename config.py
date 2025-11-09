@@ -3,8 +3,17 @@
 """
 import json
 import os
+import sys
 
-CONFIG_FILE = "wallpaper_config.json"
+# 실행 파일의 디렉토리를 기준으로 설정 파일 경로 설정
+if getattr(sys, 'frozen', False):
+    # PyInstaller로 빌드된 실행 파일
+    app_dir = os.path.dirname(sys.executable)
+else:
+    # 일반 Python 스크립트
+    app_dir = os.path.dirname(os.path.abspath(__file__))
+
+CONFIG_FILE = os.path.join(app_dir, "wallpaper_config.json")
 
 DEFAULT_CONFIG = {
     "video_path": None,

@@ -13,46 +13,13 @@ if exist "dist" (
     echo Cleaning previous dist folder...
     rmdir /s /q dist
 )
-if exist "WallpaperPlayer.spec" (
-    echo Cleaning previous spec file...
-    del WallpaperPlayer.spec
-)
 
 echo.
-echo Building executable...
+echo Building executable using build.spec...
 echo.
 
-REM PyInstaller로 실행 파일 생성
-pyinstaller --onefile ^
-    --windowed ^
-    --name="WallpaperPlayer" ^
-    --add-data="icon;icon" ^
-    --hidden-import=pygame ^
-    --hidden-import=cv2 ^
-    --hidden-import=moviepy.editor ^
-    --hidden-import=win32gui ^
-    --hidden-import=win32con ^
-    --hidden-import=win32api ^
-    --hidden-import=tkinter ^
-    --collect-all moviepy ^
-    --copy-metadata imageio ^
-    --copy-metadata imageio-ffmpeg ^
-    --copy-metadata proglog ^
-    --copy-metadata decorator ^
-    --copy-metadata tqdm ^
-    --exclude-module torch ^
-    --exclude-module pandas ^
-    --exclude-module scipy ^
-    --exclude-module matplotlib ^
-    --exclude-module pytest ^
-    --exclude-module IPython ^
-    --exclude-module jinja2 ^
-    --exclude-module sympy ^
-    --exclude-module pyarrow ^
-    --exclude-module test ^
-    --exclude-module tests ^
-    --noconfirm ^
-    main.py
+REM build.spec 파일을 사용하여 빌드 (최적화된 설정 적용)
+pyinstaller --noconfirm build.spec
 
 if %errorlevel% equ 0 (
     echo.

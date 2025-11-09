@@ -11,13 +11,7 @@ import config
 import settings_gui
 
 # moviepy import for audio extraction
-try:
-    from moviepy.editor import VideoFileClip
-except ImportError:
-    print("ERROR: moviepy not installed. Installing...")
-    import subprocess
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "moviepy"])
-    from moviepy.editor import VideoFileClip
+from moviepy.editor import VideoFileClip
 
 # pygame 초기화
 pygame.init()
@@ -189,7 +183,7 @@ config_check_interval = 0.1  # 0.1초마다만 설정 파일 체크
 # 마우스 클릭 감지 스레드
 def check_mouse_click():
     global mouse_clicked, muted, last_click_time, settings_clicked, show_icons, last_mouse_move_time, hovered_button
-    global current_volume, dragging_volume
+    global current_volume, dragging_volume, hwnd
     import time
 
     # 마우스 왼쪽 버튼 상태 확인 (VK_LBUTTON = 0x01)
@@ -197,19 +191,31 @@ def check_mouse_click():
     prev_state = False
 
     while True:
-        # 마우스 커서 위치 가져오기
-        cursor_pos = win32api.GetCursorPos()
-        x, y = cursor_pos
+        try:
+            # pygame 창의 실제 위치 가져오기 (WorkerW 자식으로 설정된 후에도 정확한 위치 추적)
+            window_rect = win32gui.GetWindowRect(hwnd)
+            window_left = window_rect[0]
+            window_top = window_rect[1]
 
-        # 화면 좌표를 작업 영역 기준으로 변환
-        rel_x = x - rect.left
-        rel_y = y - rect.top
+            # 마우스 커서 위치 가져오기
+            cursor_pos = win32api.GetCursorPos()
+            x, y = cursor_pos
 
-        # 아이콘 영역 정의 (버튼들과 음량 조절바를 포함하는 영역)
-        icon_area_x = settings_button_x - 10
-        icon_area_y = volume_slider_y - 10
-        icon_area_width = (volume_slider_x + volume_slider_width) - icon_area_x + 20
-        icon_area_height = button_size + 30
+            # 화면 좌표를 pygame 창 기준으로 변환
+            rel_x = x - window_left
+            rel_y = y - window_top
+        except:
+            # 창이 없거나 오류 발생 시 기본값 사용
+            cursor_pos = win32api.GetCursorPos()
+            x, y = cursor_pos
+            rel_x = x - rect.left
+            rel_y = y - rect.top
+
+        # 아이콘 영역 정의 (버튼들과 음량 조절바를 포함하는 영역) - 더 넓게 설정
+        icon_area_x = settings_button_x - 20
+        icon_area_y = volume_slider_y - 20
+        icon_area_width = (volume_slider_x + volume_slider_width) - icon_area_x + 40
+        icon_area_height = button_size + 50
 
         # 마우스가 아이콘 영역에 있는지 확인
         if (icon_area_x <= rel_x <= icon_area_x + icon_area_width and
@@ -275,7 +281,7 @@ def check_mouse_click():
                         last_click_time = current_time
 
         prev_state = current_state
-        time.sleep(0.016)  # CPU 사용률 줄이기 (~60Hz, 충분히 반응적)
+        time.sleep(0.01)  # CPU 사용률 줄이기 (~100Hz, 더 빠른 반응성)
 
 # 마우스 감지 스레드 시작
 mouse_thread = threading.Thread(target=check_mouse_click, daemon=True)
