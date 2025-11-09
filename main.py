@@ -193,94 +193,115 @@ def check_mouse_click():
     while True:
         try:
             # pygame 창의 실제 위치 가져오기 (WorkerW 자식으로 설정된 후에도 정확한 위치 추적)
-            window_rect = win32gui.GetWindowRect(hwnd)
-            window_left = window_rect[0]
-            window_top = window_rect[1]
+            try:
+                # hwnd 유효성 검증
+                if win32gui.IsWindow(hwnd):
+                    window_rect = win32gui.GetWindowRect(hwnd)
+                    window_left = window_rect[0]
+                    window_top = window_rect[1]
+                else:
+                    # hwnd가 유효하지 않으면 기본값 사용
+                    window_left = rect.left
+                    window_top = rect.top
+            except Exception as e:
+                # Win32 API 호출 실패 시 기본값 사용 (절전 모드 후 등)
+                print(f"Warning: Failed to get window position: {e}")
+                window_left = rect.left
+                window_top = rect.top
 
             # 마우스 커서 위치 가져오기
-            cursor_pos = win32api.GetCursorPos()
-            x, y = cursor_pos
+            try:
+                cursor_pos = win32api.GetCursorPos()
+                x, y = cursor_pos
+            except Exception as e:
+                # 마우스 위치 가져오기 실패 시 스킵
+                print(f"Warning: Failed to get cursor position: {e}")
+                time.sleep(0.1)
+                continue
 
             # 화면 좌표를 pygame 창 기준으로 변환
             rel_x = x - window_left
             rel_y = y - window_top
-        except:
-            # 창이 없거나 오류 발생 시 기본값 사용
-            cursor_pos = win32api.GetCursorPos()
-            x, y = cursor_pos
-            rel_x = x - rect.left
-            rel_y = y - rect.top
 
-        # 아이콘 영역 정의 (버튼들과 음량 조절바를 포함하는 영역) - 더 넓게 설정
-        icon_area_x = settings_button_x - 20
-        icon_area_y = volume_slider_y - 20
-        icon_area_width = (volume_slider_x + volume_slider_width) - icon_area_x + 40
-        icon_area_height = button_size + 50
+            # 아이콘 영역 정의 (버튼들과 음량 조절바를 포함하는 영역) - 더 넓게 설정
+            icon_area_x = settings_button_x - 20
+            icon_area_y = volume_slider_y - 20
+            icon_area_width = (volume_slider_x + volume_slider_width) - icon_area_x + 40
+            icon_area_height = button_size + 50
 
-        # 마우스가 아이콘 영역에 있는지 확인
-        if (icon_area_x <= rel_x <= icon_area_x + icon_area_width and
-            icon_area_y <= rel_y <= icon_area_y + icon_area_height):
-            # 아이콘 영역에 마우스가 있으면 타이머 갱신 및 아이콘 표시
-            last_mouse_move_time = time.time()
-            show_icons = True
+            # 마우스가 아이콘 영역에 있는지 확인
+            if (icon_area_x <= rel_x <= icon_area_x + icon_area_width and
+                icon_area_y <= rel_y <= icon_area_y + icon_area_height):
+                # 아이콘 영역에 마우스가 있으면 타이머 갱신 및 아이콘 표시
+                last_mouse_move_time = time.time()
+                show_icons = True
 
-            # 각 버튼별 호버 상태 확인
-            if (mute_button_x <= rel_x <= mute_button_x + button_size and
-                mute_button_y <= rel_y <= mute_button_y + button_size):
-                hovered_button = 'mute'
-            elif (settings_button_x <= rel_x <= settings_button_x + button_size and
-                  settings_button_y <= rel_y <= settings_button_y + button_size):
-                hovered_button = 'settings'
+                # 각 버튼별 호버 상태 확인
+                if (mute_button_x <= rel_x <= mute_button_x + button_size and
+                    mute_button_y <= rel_y <= mute_button_y + button_size):
+                    hovered_button = 'mute'
+                elif (settings_button_x <= rel_x <= settings_button_x + button_size and
+                      settings_button_y <= rel_y <= settings_button_y + button_size):
+                    hovered_button = 'settings'
+                else:
+                    hovered_button = None
             else:
                 hovered_button = None
-        else:
-            hovered_button = None
 
-        # 현재 마우스 버튼 상태
-        current_state = win32api.GetAsyncKeyState(VK_LBUTTON) & 0x8000
+            # 현재 마우스 버튼 상태
+            current_state = win32api.GetAsyncKeyState(VK_LBUTTON) & 0x8000
 
-        # 음량 조절바 드래그 처리
-        if current_state:
-            # 아이콘이 표시되어 있거나 이미 드래그 중일 때만 처리
-            if show_icons or dragging_volume:
-                # 음량 조절바 영역 확인 (세로로 좀 더 넓게)
-                if (volume_slider_x <= rel_x <= volume_slider_x + volume_slider_width and
-                    volume_slider_y - 10 <= rel_y <= volume_slider_y + volume_slider_height + 10):
-                    dragging_volume = True
-                    # 음량 계산 (0.0 ~ 1.0)
-                    volume_ratio = (rel_x - volume_slider_x) / volume_slider_width
-                    volume_ratio = max(0.0, min(1.0, volume_ratio))
-                    current_volume = volume_ratio
-                    config.set_volume(current_volume)
-                    mouse_clicked = True  # 볼륨 업데이트 트리거
-        else:
-            dragging_volume = False
+            # 음량 조절바 드래그 처리
+            if current_state:
+                # 아이콘이 표시되어 있거나 이미 드래그 중일 때만 처리
+                if show_icons or dragging_volume:
+                    # 음량 조절바 영역 확인 (세로로 좀 더 넓게)
+                    if (volume_slider_x <= rel_x <= volume_slider_x + volume_slider_width and
+                        volume_slider_y - 10 <= rel_y <= volume_slider_y + volume_slider_height + 10):
+                        dragging_volume = True
+                        # 음량 계산 (0.0 ~ 1.0)
+                        volume_ratio = (rel_x - volume_slider_x) / volume_slider_width
+                        volume_ratio = max(0.0, min(1.0, volume_ratio))
+                        current_volume = volume_ratio
+                        config.set_volume(current_volume)
+                        mouse_clicked = True  # 볼륨 업데이트 트리거
+            else:
+                dragging_volume = False
 
-        # 버튼이 눌렸다가 떼어졌을 때 (클릭)
-        if prev_state and not current_state:
-            # 디바운싱
-            current_time = time.time()
-            if current_time - last_click_time > 0.3:  # 300ms
+            # 버튼이 눌렸다가 떼어졌을 때 (클릭)
+            if prev_state and not current_state:
+                # 디바운싱
+                current_time = time.time()
+                if current_time - last_click_time > 0.3:  # 300ms
 
-                # 아이콘이 표시되어 있을 때만 버튼 클릭 처리
-                if show_icons:
-                    # 음소거 버튼 클릭 확인
-                    if (mute_button_x <= rel_x <= mute_button_x + button_size and
-                        mute_button_y <= rel_y <= mute_button_y + button_size):
+                    # 아이콘이 표시되어 있을 때만 버튼 클릭 처리
+                    if show_icons:
+                        # 음소거 버튼 클릭 확인
+                        if (mute_button_x <= rel_x <= mute_button_x + button_size and
+                            mute_button_y <= rel_y <= mute_button_y + button_size):
 
-                        muted = not muted
-                        config.set_muted(muted)
-                        last_click_time = current_time
-                        mouse_clicked = True
+                            muted = not muted
+                            config.set_muted(muted)
+                            last_click_time = current_time
+                            mouse_clicked = True
 
-                    # 설정 버튼 클릭 확인
-                    elif (settings_button_x <= rel_x <= settings_button_x + button_size and
-                          settings_button_y <= rel_y <= settings_button_y + button_size):
+                        # 설정 버튼 클릭 확인
+                        elif (settings_button_x <= rel_x <= settings_button_x + button_size and
+                              settings_button_y <= rel_y <= settings_button_y + button_size):
 
-                        settings_clicked = True
-                        last_click_time = current_time
+                            settings_clicked = True
+                            last_click_time = current_time
 
-        prev_state = current_state
+            prev_state = current_state
+
+        except Exception as e:
+            # 예외 발생 시 스레드가 종료되지 않도록 처리 (절전 모드 복귀 등)
+            print(f"Error in mouse detection thread: {e}")
+            import traceback
+            traceback.print_exc()
+            time.sleep(0.1)  # 에러 발생 시 잠시 대기 후 재시도
+            continue
+
         time.sleep(0.01)  # CPU 사용률 줄이기 (~100Hz, 더 빠른 반응성)
 
 # 마우스 감지 스레드 시작
