@@ -1,0 +1,260 @@
+"""
+비디오 캡처 모듈
+- ThreadedVideoCapture: 멀티스레드 비디오 디코딩
+- 프레임 스킵을 읽기 단계에서 수행하여 CPU 절감
+- Idle 모드 지원
+- Context Manager 패턴으로 안전한 리소스 관리
+"""
+import cv2
+import threading
+import time
+from queue import Queue, Empty
+from logger import get_logger
+
+logger = get_logger("VideoCapture")
+
+
+class ThreadedVideoCapture:
+    """
+    멀티스레드 비디오 캡처 클래스 (개선 버전)
+
+    주요 개선사항:
+    1. cap.grab()으로 불필요한 프레임 디코딩 스킵
+    2. Context Manager 패턴 지원 (__enter__, __exit__)
+    3. 예외 처리 강화 (절전 모드 복귀 등)
+    4. Idle 모드 지원
+    5. 프레임 재사용으로 메모리 효율 개선
+    """
+
+    def __init__(self, video_path, queue_size=3, target_fps=None, video_fps=None):
+        """
+        Args:
+            video_path: 비디오 파일 경로
+            queue_size: 프레임 버퍼 크기
+            target_fps: 목표 FPS (None이면 원본 FPS)
+            video_fps: 원본 비디오 FPS
+        """
+        self.video_path = video_path
+        self.queue_size = queue_size
+        self.target_fps = target_fps
+        self.video_fps = video_fps
+
+        # VideoCapture 초기화
+        try:
+            self.cap = cv2.VideoCapture(video_path, cv2.CAP_MSMF)  # Windows Media Foundation
+            if not self.cap.isOpened():
+                raise RuntimeError(f"Failed to open video: {video_path}")
+        except Exception as e:
+            logger.error(f"VideoCapture initialization failed: {e}")
+            raise
+
+        # 프레임 큐
+        self.queue = Queue(maxsize=queue_size)
+
+        # 스레드 제어 플래그
+        self.stopped = False
+        self.paused = False
+        self.reader_thread = None
+
+        # 프레임 카운터
+        self.frame_count = 0
+        self.total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
+        # 프레임 스킵 비율 계산
+        self._update_skip_ratio()
+
+        # 에러 복구
+        self.consecutive_errors = 0
+        self.max_consecutive_errors = 10
+
+        logger.info(
+            f"ThreadedVideoCapture initialized: {video_path}, "
+            f"video_fps={video_fps}, target_fps={target_fps}, skip_ratio={self.skip_ratio}"
+        )
+
+    def _update_skip_ratio(self):
+        """프레임 스킵 비율 재계산"""
+        if self.target_fps and self.video_fps and self.target_fps < self.video_fps:
+            self.skip_ratio = int(self.video_fps / self.target_fps)
+        else:
+            self.skip_ratio = 1
+        logger.debug(f"Skip ratio updated: {self.skip_ratio}")
+
+    def start(self):
+        """백그라운드 스레드 시작"""
+        if self.reader_thread and self.reader_thread.is_alive():
+            logger.warning("Reader thread is already running")
+            return self
+
+        self.stopped = False
+        self.reader_thread = threading.Thread(target=self._reader, daemon=True, name="VideoReader")
+        self.reader_thread.start()
+        logger.info("Reader thread started")
+        return self
+
+    def _reader(self):
+        """
+        백그라운드 프레임 디코딩 스레드
+
+        개선사항:
+        - cap.grab()으로 불필요한 프레임 스킵
+        - 예외 처리로 절전 모드 복귀 등 대응
+        - 루프 재시작 시 프레임 카운터 리셋
+        """
+        while not self.stopped:
+            try:
+                # Idle 모드 처리
+                if self.paused:
+                    time.sleep(0.1)
+                    continue
+
+                # 큐가 가득 차면 대기
+                if self.queue.full():
+                    time.sleep(0.001)
+                    continue
+
+                self.frame_count += 1
+
+                # 프레임 스킵 처리 (읽기 단계에서 스킵)
+                if self.skip_ratio > 1 and self.frame_count % self.skip_ratio != 0:
+                    # grab()은 프레임을 디코딩하지 않고 위치만 이동
+                    ret = self.cap.grab()
+                    if not ret:
+                        # 비디오 끝 - 루프 재시작
+                        self._restart_video()
+                    continue
+
+                # 필요한 프레임만 실제로 디코딩
+                ret, frame = self.cap.read()
+
+                if not ret or frame is None:
+                    # 비디오 끝 - 루프 재시작
+                    self._restart_video()
+                    self.consecutive_errors = 0
+                    continue
+
+                # 프레임을 큐에 추가
+                self.queue.put((True, frame), timeout=1.0)
+                self.consecutive_errors = 0
+
+            except Exception as e:
+                self.consecutive_errors += 1
+                logger.error(f"Error in reader thread: {e} (consecutive: {self.consecutive_errors})")
+
+                if self.consecutive_errors >= self.max_consecutive_errors:
+                    logger.critical("Too many consecutive errors, stopping reader thread")
+                    self.stopped = True
+                    break
+
+                time.sleep(0.1)  # 에러 발생 시 잠시 대기 후 재시도
+
+        logger.info("Reader thread stopped")
+
+    def _restart_video(self):
+        """비디오 루프 재시작"""
+        try:
+            self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+            self.frame_count = 0
+            logger.debug("Video looped")
+        except Exception as e:
+            logger.error(f"Failed to restart video: {e}")
+
+    def read(self, timeout=1.0):
+        """
+        큐에서 프레임 가져오기
+
+        Args:
+            timeout: 타임아웃 (초)
+
+        Returns:
+            tuple: (ret, frame) - ret은 성공 여부, frame은 프레임 데이터
+        """
+        try:
+            return self.queue.get(timeout=timeout)
+        except Empty:
+            logger.warning("Frame queue empty")
+            return False, None
+
+    def get(self, prop):
+        """VideoCapture 속성 가져오기"""
+        try:
+            return self.cap.get(prop)
+        except Exception as e:
+            logger.error(f"Failed to get property {prop}: {e}")
+            return 0
+
+    def set(self, prop, value):
+        """VideoCapture 속성 설정"""
+        try:
+            return self.cap.set(prop, value)
+        except Exception as e:
+            logger.error(f"Failed to set property {prop} to {value}: {e}")
+            return False
+
+    def update_fps(self, target_fps):
+        """
+        목표 FPS 업데이트
+
+        Args:
+            target_fps: 새로운 목표 FPS
+        """
+        self.target_fps = target_fps
+        self._update_skip_ratio()
+        logger.info(f"Target FPS updated to {target_fps}, new skip_ratio={self.skip_ratio}")
+
+    def pause(self):
+        """Idle 모드 - 프레임 디코딩 일시정지"""
+        if not self.paused:
+            self.paused = True
+            logger.info("Video capture paused (idle mode)")
+
+    def resume(self):
+        """Idle 모드 해제 - 프레임 디코딩 재개"""
+        if self.paused:
+            self.paused = False
+            logger.info("Video capture resumed")
+
+    def isOpened(self):
+        """비디오가 열려있는지 확인"""
+        try:
+            return self.cap is not None and self.cap.isOpened()
+        except:
+            return False
+
+    def release(self):
+        """리소스 정리"""
+        logger.info("Releasing video capture resources")
+
+        # 스레드 정지
+        self.stopped = True
+
+        # 스레드가 종료될 때까지 대기 (최대 2초)
+        if self.reader_thread and self.reader_thread.is_alive():
+            self.reader_thread.join(timeout=2.0)
+
+        # VideoCapture 해제
+        if self.cap is not None:
+            try:
+                self.cap.release()
+            except Exception as e:
+                logger.error(f"Error releasing VideoCapture: {e}")
+
+        # 큐 비우기
+        while not self.queue.empty():
+            try:
+                self.queue.get_nowait()
+            except Empty:
+                break
+
+        logger.info("Video capture resources released")
+
+    # Context Manager 패턴 지원
+    def __enter__(self):
+        """Context Manager 진입"""
+        self.start()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Context Manager 종료"""
+        self.release()
+        return False  # 예외를 전파함

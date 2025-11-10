@@ -1,3 +1,27 @@
+"""
+==============================================================================
+Wallpaper Player - 리팩토링 버전
+==============================================================================
+
+주요 개선사항:
+1. 모듈화 - logger, video_capture, audio_manager, ui_manager, performance_monitor 분리
+2. 클래스 기반 구조 - WallpaperApp 클래스로 앱 로직 캡슐화
+3. Context Manager - 안전한 리소스 관리
+4. 표준 로깅 - logging 모듈 사용
+5. 예외 처리 강화 - 절전 모드 복귀 등 대응
+6. 성능 최적화 - 프레임 스킵, 동적 FPS, Idle 모드
+
+모듈 구조:
+- logger.py: 로깅 설정
+- performance_monitor.py: 성능 모니터링 및 동적 FPS 조절
+- video_capture.py: ThreadedVideoCapture (멀티스레드 비디오 디코딩)
+- audio_manager.py: 오디오 추출 및 재생 관리
+- ui_manager.py: UI 요소 (아이콘, 슬라이더) 관리
+- config.py: 설정 파일 관리 (기존 유지)
+- settings_gui.py: 설정 GUI (기존 유지)
+==============================================================================
+"""
+
 import cv2
 import pygame
 import win32gui
@@ -5,670 +29,637 @@ import win32con
 import win32api
 import ctypes
 import os
-import threading
 import sys
+import time
+import threading
+
+# 커스텀 모듈 import
 import config
 import settings_gui
-import numpy as np
+from logger import get_logger
+from performance_monitor import PerformanceMonitor
+from video_capture import ThreadedVideoCapture
+from audio_manager import AudioManager
+from ui_manager import UIManager
 
-# moviepy import for audio extraction
-from moviepy.editor import VideoFileClip
+# 로거 초기화
+logger = get_logger("Main")
 
-# pygame 초기화
-pygame.init()
-pygame.mixer.init(frequency=44100, size=-16, channels=2, buffer=2048)
 
-# 임시 오디오 파일 디렉토리
-import tempfile
-temp_dir = tempfile.gettempdir()
+class WallpaperApp:
+    """
+    Wallpaper Player 메인 애플리케이션 클래스
 
-def extract_audio(video_path):
-    """비디오에서 오디오를 추출하여 임시 파일로 저장"""
-    try:
-        print(f"Extracting audio from: {os.path.basename(video_path)}")
+    주요 책임:
+    1. 전체 앱 생명주기 관리
+    2. 비디오/오디오/UI 모듈 조율
+    3. Windows 데스크톱 통합
+    4. 사용자 입력 처리
+    5. 설정 관리
+    """
 
-        # 비디오 파일명 기반으로 임시 오디오 파일명 생성
-        video_basename = os.path.splitext(os.path.basename(video_path))[0]
-        audio_temp_path = os.path.join(temp_dir, f"wallpaper_audio_{video_basename}.mp3")
+    def __init__(self):
+        """앱 초기화"""
+        logger.info("=" * 70)
+        logger.info("Wallpaper Player - Initializing (Refactored Version)")
+        logger.info("=" * 70)
 
-        # 이미 추출된 파일이 있으면 재사용
-        if os.path.exists(audio_temp_path):
-            print(f"Using cached audio file: {audio_temp_path}")
-            return audio_temp_path
+        # pygame 초기화
+        pygame.init()
 
-        # moviepy로 오디오 추출
-        video_clip = VideoFileClip(video_path)
+        # 비디오 경로 로드
+        self.video_path = config.get_video_path()
+        if not self.video_path or not os.path.exists(self.video_path):
+            logger.info("First time setup required")
+            self.video_path = settings_gui.show_first_time_setup()
+            if not self.video_path:
+                logger.warning("No video selected, exiting")
+                sys.exit(0)
 
-        if video_clip.audio is None:
-            print("Warning: Video has no audio track")
-            video_clip.close()
-            return None
+        # 화면 설정
+        self._setup_screen()
 
-        video_clip.audio.write_audiofile(audio_temp_path, logger=None, verbose=False)
-        video_clip.close()
+        # Windows 데스크톱 통합
+        self._setup_desktop_integration()
 
-        print(f"Audio extracted successfully: {audio_temp_path}")
-        return audio_temp_path
-    except Exception as e:
-        print(f"Error extracting audio: {e}")
-        import traceback
-        traceback.print_exc()
-        return None
+        # 모듈 초기화
+        self.audio_manager = AudioManager()
+        self.ui_manager = UIManager(self.work_area_width, self.work_area_height)
+        self.performance_monitor = None  # 나중에 초기화 (video_fps 필요)
+        self.video_capture = None  # 나중에 초기화
 
-# 첫 실행 확인 및 동영상 선택
-video_path = config.get_video_path()
+        # 상태 변수
+        self.running = True
+        self.is_idle = False
+        self.last_activity_time = time.time()
+        self.idle_threshold = 30.0  # 30초
 
-if not video_path or not os.path.exists(video_path):
-    print("First time setup...")
-    video_path = settings_gui.show_first_time_setup()
+        # 설정 로드
+        self.current_volume = config.get_volume()
+        self.muted = config.get_muted()
+        self.icon_opacity = config.get_actual_icon_opacity()
 
-    if not video_path:
-        sys.exit(0)
+        # 설정 창 관리
+        self.settings_window = None
+        self.reload_video_flag = False
 
-print(f"Loading video: {video_path}")
+        # 설정 체크 최적화
+        self.last_config_check_time = time.time()
+        self.config_check_interval = 0.5  # 0.5초마다
 
-# 화면 및 작업표시줄 크기 가져오기
-screen_info = pygame.display.Info()
-screen_width = screen_info.current_w
-screen_height = screen_info.current_h
+        # 마지막 프레임 (idle 모드용)
+        self.last_frame_surface = None
 
-# 작업 영역 크기 가져오기 (작업표시줄 제외)
-class RECT(ctypes.Structure):
-    _fields_ = [
-        ('left', ctypes.c_long),
-        ('top', ctypes.c_long),
-        ('right', ctypes.c_long),
-        ('bottom', ctypes.c_long)
-    ]
+        # pygame clock
+        self.clock = pygame.time.Clock()
 
-rect = RECT()
-ctypes.windll.user32.SystemParametersInfoW(48, 0, ctypes.byref(rect), 0)  # SPI_GETWORKAREA
-work_area_height = rect.bottom - rect.top
-work_area_width = rect.right - rect.left
+        # 마우스 입력 스레드
+        self.mouse_thread = None
+        self.mouse_clicked = False
+        self.settings_clicked = False
+        self.dragging_volume = False
 
-# pygame 창 생성 (작업표시줄 제외한 영역만)
-screen = pygame.display.set_mode((work_area_width, work_area_height), pygame.NOFRAME)
-pygame.display.set_caption("Wallpaper Player")
+        logger.info("WallpaperApp initialized successfully")
 
-# pygame 창 핸들 가져오기
-hwnd = pygame.display.get_wm_info()['window']
+    def _setup_screen(self):
+        """화면 설정"""
+        # 화면 정보 가져오기
+        screen_info = pygame.display.Info()
+        screen_width = screen_info.current_w
+        screen_height = screen_info.current_h
 
-# 창 위치를 작업 영역 시작점으로 이동
-win32gui.SetWindowPos(hwnd, 0, rect.left, rect.top, work_area_width, work_area_height, 0)
+        # 작업 영역 크기 가져오기 (작업표시줄 제외)
+        class RECT(ctypes.Structure):
+            _fields_ = [
+                ('left', ctypes.c_long),
+                ('top', ctypes.c_long),
+                ('right', ctypes.c_long),
+                ('bottom', ctypes.c_long)
+            ]
 
-# WorkerW 윈도우를 찾기 위한 콜백 함수
-workerw = None
-def enum_windows_callback(hwnd_check, _):
-    global workerw
-    p = win32gui.FindWindowEx(hwnd_check, 0, "SHELLDLL_DefView", None)
-    if p != 0:
-        workerw = win32gui.FindWindowEx(0, hwnd_check, "WorkerW", None)
-    return True
+        rect = RECT()
+        ctypes.windll.user32.SystemParametersInfoW(48, 0, ctypes.byref(rect), 0)  # SPI_GETWORKAREA
 
-# Progman 찾기 및 메시지 전송
-progman = win32gui.FindWindow("Progman", None)
-win32gui.SendMessageTimeout(progman, 0x052C, 0, 0, win32con.SMTO_NORMAL, 1000)
+        self.work_area_width = rect.right - rect.left
+        self.work_area_height = rect.bottom - rect.top
+        self.work_area_left = rect.left
+        self.work_area_top = rect.top
 
-# WorkerW 찾기
-win32gui.EnumWindows(enum_windows_callback, 0)
+        logger.info(f"Screen: {screen_width}x{screen_height}, Work area: {self.work_area_width}x{self.work_area_height}")
 
-if workerw is not None:
-    # pygame 창을 WorkerW의 자식으로 설정
-    win32gui.SetParent(hwnd, workerw)
-else:
-    print("WorkerW not found. Running in normal window mode.")
+        # pygame 창 생성
+        self.screen = pygame.display.set_mode((self.work_area_width, self.work_area_height), pygame.NOFRAME)
+        pygame.display.set_caption("Wallpaper Player")
 
-# 음소거 상태 (설정에서 로드)
-muted = config.get_muted()
-mouse_clicked = False
-last_click_time = 0
-settings_clicked = False
-reload_video = False  # 동영상 재로드 플래그
-settings_window = None  # 설정 창 객체
+        # pygame 창 핸들
+        self.hwnd = pygame.display.get_wm_info()['window']
 
-# 아이콘 표시 상태
-import time
-show_icons = True
-last_mouse_move_time = time.time()  # 현재 시간으로 초기화하여 시작시 아이콘 표시
-icon_show_duration = 10.0  # 10초
+        # 창 위치 이동
+        win32gui.SetWindowPos(
+            self.hwnd, 0,
+            self.work_area_left, self.work_area_top,
+            self.work_area_width, self.work_area_height,
+            0
+        )
 
-# 호버 상태 추적
-hovered_button = None  # 'mute', 'settings', or None
-
-# 실행 파일 경로 확인
-if getattr(sys, 'frozen', False):
-    # PyInstaller로 빌드된 실행 파일
-    base_path = sys._MEIPASS
-else:
-    # 일반 Python 스크립트
-    base_path = os.path.dirname(os.path.abspath(__file__))
-
-# 버튼 위치 및 크기 (작업 영역 기준)
-button_size = 60
-
-# 아이콘 로드 및 크기 조정
-icon_dir = os.path.join(base_path, "icon")
-volume_icon = pygame.image.load(os.path.join(icon_dir, "volume.png")).convert_alpha()
-volume_icon = pygame.transform.scale(volume_icon, (button_size, button_size))
-
-mute_icon = pygame.image.load(os.path.join(icon_dir, "mute.png")).convert_alpha()
-mute_icon = pygame.transform.scale(mute_icon, (button_size, button_size))
-
-settings_icon = pygame.image.load(os.path.join(icon_dir, "setting.png")).convert_alpha()
-settings_icon = pygame.transform.scale(settings_icon, (button_size, button_size))
-
-# 음량 조절바 설정
-volume_slider_width = 150
-volume_slider_height = 10
-volume_slider_x = work_area_width - volume_slider_width - 80  # 오른쪽 여백 증가 (20 -> 80)
-volume_slider_y = work_area_height - 35
-
-# 버튼 위치 (음량 조절바 왼쪽으로 이동)
-mute_button_x = volume_slider_x - button_size - 20
-mute_button_y = work_area_height - button_size - 20
-
-settings_button_x = mute_button_x - button_size - 10
-settings_button_y = work_area_height - button_size - 20
-
-# 음량 조절 상태
-current_volume = config.get_volume()
-dragging_volume = False
-
-# 아이콘 투명도 (설정에서 로드)
-icon_opacity = config.get_actual_icon_opacity()  # 0.2-1.0
-
-# 설정 파일 체크 최적화 (매 프레임마다 읽지 않고 주기적으로 체크)
-last_config_check_time = time.time()
-config_check_interval = 0.5  # 0.5초마다만 설정 파일 체크 (CPU 사용률 감소)
-
-# 마우스 클릭 감지 스레드
-def check_mouse_click():
-    global mouse_clicked, muted, last_click_time, settings_clicked, show_icons, last_mouse_move_time, hovered_button
-    global current_volume, dragging_volume, hwnd
-    import time
-
-    # 마우스 왼쪽 버튼 상태 확인 (VK_LBUTTON = 0x01)
-    VK_LBUTTON = 0x01
-    prev_state = False
-
-    while True:
+    def _setup_desktop_integration(self):
+        """Windows 데스크톱 통합 (벽지처럼 배경에 표시)"""
         try:
-            # pygame 창의 실제 위치 가져오기 (WorkerW 자식으로 설정된 후에도 정확한 위치 추적)
-            try:
-                # hwnd 유효성 검증
-                if win32gui.IsWindow(hwnd):
-                    window_rect = win32gui.GetWindowRect(hwnd)
-                    window_left = window_rect[0]
-                    window_top = window_rect[1]
-                else:
-                    # hwnd가 유효하지 않으면 기본값 사용
-                    window_left = rect.left
-                    window_top = rect.top
-            except Exception as e:
-                # Win32 API 호출 실패 시 기본값 사용 (절전 모드 후 등)
-                print(f"Warning: Failed to get window position: {e}")
-                window_left = rect.left
-                window_top = rect.top
+            # WorkerW 윈도우 찾기
+            self.workerw = None
 
-            # 마우스 커서 위치 가져오기
+            def enum_windows_callback(hwnd_check, _):
+                p = win32gui.FindWindowEx(hwnd_check, 0, "SHELLDLL_DefView", None)
+                if p != 0:
+                    self.workerw = win32gui.FindWindowEx(0, hwnd_check, "WorkerW", None)
+                return True
+
+            # Progman에 메시지 전송
+            progman = win32gui.FindWindow("Progman", None)
+            win32gui.SendMessageTimeout(progman, 0x052C, 0, 0, win32con.SMTO_NORMAL, 1000)
+
+            # WorkerW 찾기
+            win32gui.EnumWindows(enum_windows_callback, 0)
+
+            if self.workerw is not None:
+                # pygame 창을 WorkerW의 자식으로 설정
+                win32gui.SetParent(self.hwnd, self.workerw)
+                logger.info("Desktop integration successful")
+            else:
+                logger.warning("WorkerW not found, running in normal window mode")
+
+        except Exception as e:
+            logger.error(f"Desktop integration failed: {e}", exc_info=True)
+
+    def load_video(self, video_path):
+        """
+        비디오 로드
+
+        Args:
+            video_path: 비디오 파일 경로
+
+        Returns:
+            bool: 성공 여부
+        """
+        try:
+            logger.info(f"Loading video: {os.path.basename(video_path)}")
+
+            # 기존 비디오 캡처 정리
+            if self.video_capture:
+                self.video_capture.release()
+
+            # 비디오 FPS 및 설정 가져오기
+            temp_cap = cv2.VideoCapture(video_path, cv2.CAP_MSMF)
+            if not temp_cap.isOpened():
+                logger.error(f"Failed to open video: {video_path}")
+                return False
+
+            video_fps = temp_cap.get(cv2.CAP_PROP_FPS)
+            if video_fps <= 0 or video_fps > 120:
+                video_fps = 30.0
+                logger.warning("Invalid FPS detected, using default 30")
+
+            total_frames = int(temp_cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            video_duration = total_frames / video_fps if video_fps > 0 else 0
+
+            logger.info(f"Video FPS: {video_fps:.2f}, Duration: {video_duration:.2f}s, Frames: {total_frames}")
+
+            temp_cap.release()
+
+            # 목표 FPS
+            target_fps = config.get_target_fps()
+            logger.info(f"Target FPS: {target_fps}")
+
+            # ThreadedVideoCapture 생성 및 시작
+            self.video_capture = ThreadedVideoCapture(
+                video_path,
+                queue_size=3,
+                target_fps=target_fps,
+                video_fps=video_fps
+            )
+            self.video_capture.start()
+
+            # PerformanceMonitor 초기화 (비디오 FPS 기반)
+            if self.performance_monitor is None:
+                self.performance_monitor = PerformanceMonitor(
+                    target_fps=target_fps,
+                    min_fps=15,
+                    max_fps=int(video_fps)
+                )
+            else:
+                self.performance_monitor.set_target_fps(target_fps)
+
+            # 오디오 로드
+            self.audio_manager.load_audio(video_path, volume=self.current_volume, muted=self.muted)
+
+            # 비디오 경로 저장
+            self.video_path = video_path
+
+            logger.info("Video and audio loaded successfully")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to load video: {e}", exc_info=True)
+            return False
+
+    def start_mouse_thread(self):
+        """마우스 입력 감지 스레드 시작"""
+        self.mouse_thread = threading.Thread(target=self._mouse_input_loop, daemon=True, name="MouseInput")
+        self.mouse_thread.start()
+        logger.info("Mouse input thread started")
+
+    def _mouse_input_loop(self):
+        """
+        마우스 입력 감지 루프 (별도 스레드)
+
+        기능:
+        1. 마우스 위치 감지 및 버튼 호버
+        2. 클릭 감지 (음소거, 설정)
+        3. 볼륨 슬라이더 드래그
+        4. Idle 타이머 관리
+        """
+        VK_LBUTTON = 0x01
+        prev_state = False
+        last_click_time = 0
+
+        while self.running:
             try:
-                cursor_pos = win32api.GetCursorPos()
-                x, y = cursor_pos
+                # 창 위치 가져오기
+                try:
+                    if win32gui.IsWindow(self.hwnd):
+                        window_rect = win32gui.GetWindowRect(self.hwnd)
+                        window_left = window_rect[0]
+                        window_top = window_rect[1]
+                    else:
+                        window_left = self.work_area_left
+                        window_top = self.work_area_top
+                except:
+                    window_left = self.work_area_left
+                    window_top = self.work_area_top
+
+                # 마우스 커서 위치
+                try:
+                    cursor_pos = win32api.GetCursorPos()
+                    x, y = cursor_pos
+                except:
+                    time.sleep(0.1)
+                    continue
+
+                # 상대 좌표
+                rel_x = x - window_left
+                rel_y = y - window_top
+
+                # 아이콘 영역 호버 체크
+                is_in_icon_area = self.ui_manager.update_hover(rel_x, rel_y)
+
+                if is_in_icon_area:
+                    self.ui_manager.on_mouse_move()
+                    self.last_activity_time = time.time()  # Idle 타이머 리셋
+
+                # 마우스 버튼 상태
+                current_state = win32api.GetAsyncKeyState(VK_LBUTTON) & 0x8000
+
+                # 볼륨 슬라이더 드래그
+                if current_state and self.ui_manager.show_icons:
+                    # 슬라이더 영역 확인
+                    if (self.ui_manager.volume_slider_x <= rel_x <= self.ui_manager.volume_slider_x + self.ui_manager.volume_slider_width and
+                        self.ui_manager.volume_slider_y - 10 <= rel_y <= self.ui_manager.volume_slider_y + self.ui_manager.volume_slider_height + 10):
+                        self.dragging_volume = True
+                        # 볼륨 계산
+                        volume_ratio = (rel_x - self.ui_manager.volume_slider_x) / self.ui_manager.volume_slider_width
+                        volume_ratio = max(0.0, min(1.0, volume_ratio))
+                        self.current_volume = volume_ratio
+                        config.set_volume(volume_ratio)
+                        self.mouse_clicked = True
+                else:
+                    self.dragging_volume = False
+
+                # 클릭 감지 (버튼 눌렀다 뗐을 때)
+                if prev_state and not current_state:
+                    current_time = time.time()
+                    if current_time - last_click_time > 0.3:  # 디바운싱
+                        if self.ui_manager.show_icons:
+                            # 음소거 버튼
+                            if (self.ui_manager.mute_button_x <= rel_x <= self.ui_manager.mute_button_x + self.ui_manager.button_size and
+                                self.ui_manager.mute_button_y <= rel_y <= self.ui_manager.mute_button_y + self.ui_manager.button_size):
+                                self.muted = not self.muted
+                                config.set_muted(self.muted)
+                                last_click_time = current_time
+                                self.mouse_clicked = True
+
+                            # 설정 버튼
+                            elif (self.ui_manager.settings_button_x <= rel_x <= self.ui_manager.settings_button_x + self.ui_manager.button_size and
+                                  self.ui_manager.settings_button_y <= rel_y <= self.ui_manager.settings_button_y + self.ui_manager.button_size):
+                                self.settings_clicked = True
+                                last_click_time = current_time
+
+                prev_state = current_state
+
             except Exception as e:
-                # 마우스 위치 가져오기 실패 시 스킵
-                print(f"Warning: Failed to get cursor position: {e}")
+                logger.error(f"Error in mouse input loop: {e}")
                 time.sleep(0.1)
                 continue
 
-            # 화면 좌표를 pygame 창 기준으로 변환
-            rel_x = x - window_left
-            rel_y = y - window_top
+            time.sleep(0.02)  # ~50Hz
 
-            # 아이콘 영역 정의 (버튼들과 음량 조절바를 포함하는 영역) - 더 넓게 설정
-            icon_area_x = settings_button_x - 20
-            icon_area_y = volume_slider_y - 20
-            icon_area_width = (volume_slider_x + volume_slider_width) - icon_area_x + 40
-            icon_area_height = button_size + 50
+        logger.info("Mouse input thread stopped")
 
-            # 마우스가 아이콘 영역에 있는지 확인
-            if (icon_area_x <= rel_x <= icon_area_x + icon_area_width and
-                icon_area_y <= rel_y <= icon_area_y + icon_area_height):
-                # 아이콘 영역에 마우스가 있으면 타이머 갱신 및 아이콘 표시
-                last_mouse_move_time = time.time()
-                show_icons = True
+    def handle_settings_window(self):
+        """설정 창 처리"""
+        if self.settings_clicked:
+            self.settings_clicked = False
 
-                # 각 버튼별 호버 상태 확인
-                if (mute_button_x <= rel_x <= mute_button_x + button_size and
-                    mute_button_y <= rel_y <= mute_button_y + button_size):
-                    hovered_button = 'mute'
-                elif (settings_button_x <= rel_x <= settings_button_x + button_size and
-                      settings_button_y <= rel_y <= settings_button_y + button_size):
-                    hovered_button = 'settings'
-                else:
-                    hovered_button = None
-            else:
-                hovered_button = None
+            if self.settings_window is None or not self.settings_window.is_open():
+                logger.info("Opening settings window")
 
-            # 현재 마우스 버튼 상태
-            current_state = win32api.GetAsyncKeyState(VK_LBUTTON) & 0x8000
+                # 비디오/오디오 싱크를 위해 재시작
+                if self.video_capture:
+                    self.video_capture.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                if self.audio_manager.has_audio:
+                    self.audio_manager.rewind()
 
-            # 음량 조절바 드래그 처리
-            if current_state:
-                # 아이콘이 표시되어 있거나 이미 드래그 중일 때만 처리
-                if show_icons or dragging_volume:
-                    # 음량 조절바 영역 확인 (세로로 좀 더 넓게)
-                    if (volume_slider_x <= rel_x <= volume_slider_x + volume_slider_width and
-                        volume_slider_y - 10 <= rel_y <= volume_slider_y + volume_slider_height + 10):
-                        dragging_volume = True
-                        # 음량 계산 (0.0 ~ 1.0)
-                        volume_ratio = (rel_x - volume_slider_x) / volume_slider_width
-                        volume_ratio = max(0.0, min(1.0, volume_ratio))
-                        current_volume = volume_ratio
-                        config.set_volume(current_volume)
-                        mouse_clicked = True  # 볼륨 업데이트 트리거
-            else:
-                dragging_volume = False
+                self.settings_window = settings_gui.show_settings_window()
 
-            # 버튼이 눌렸다가 떼어졌을 때 (클릭)
-            if prev_state and not current_state:
-                # 디바운싱
-                current_time = time.time()
-                if current_time - last_click_time > 0.3:  # 300ms
-
-                    # 아이콘이 표시되어 있을 때만 버튼 클릭 처리
-                    if show_icons:
-                        # 음소거 버튼 클릭 확인
-                        if (mute_button_x <= rel_x <= mute_button_x + button_size and
-                            mute_button_y <= rel_y <= mute_button_y + button_size):
-
-                            muted = not muted
-                            config.set_muted(muted)
-                            last_click_time = current_time
-                            mouse_clicked = True
-
-                        # 설정 버튼 클릭 확인
-                        elif (settings_button_x <= rel_x <= settings_button_x + button_size and
-                              settings_button_y <= rel_y <= settings_button_y + button_size):
-
-                            settings_clicked = True
-                            last_click_time = current_time
-
-            prev_state = current_state
-
-        except Exception as e:
-            # 예외 발생 시 스레드가 종료되지 않도록 처리 (절전 모드 복귀 등)
-            print(f"Error in mouse detection thread: {e}")
-            import traceback
-            traceback.print_exc()
-            time.sleep(0.1)  # 에러 발생 시 잠시 대기 후 재시도
-            continue
-
-        time.sleep(0.02)  # CPU 사용률 줄이기 (~50Hz, 충분한 반응성)
-
-# 마우스 감지 스레드 시작
-mouse_thread = threading.Thread(target=check_mouse_click, daemon=True)
-mouse_thread.start()
-
-# 동영상 및 오디오 재생 준비
-print("Loading video with audio...")
-# 하드웨어 가속 비디오 디코딩 활성화 (CPU 사용률 대폭 감소)
-# CAP_MSMF: Windows Media Foundation (Windows 전용, 가장 안정적)
-# CAP_PROP_HW_ACCELERATION: GPU 하드웨어 디코더 사용
-try:
-    print("Attempting hardware-accelerated video decoding...")
-    cap = cv2.VideoCapture(video_path, cv2.CAP_MSMF,
-                          [cv2.CAP_PROP_HW_ACCELERATION, cv2.VIDEO_ACCELERATION_ANY])
-    if cap.isOpened():
-        print("✓ Hardware acceleration enabled (GPU decoding)")
-    else:
-        print("Hardware acceleration failed, falling back to software decoding...")
-        cap = cv2.VideoCapture(video_path)
-except Exception as e:
-    print(f"Hardware acceleration not available: {e}")
-    print("Using software decoding...")
-    cap = cv2.VideoCapture(video_path)
-
-if not cap.isOpened():
-    print(f"Failed to open video: {video_path}")
-    pygame.quit()
-    sys.exit(1)
-
-# 오디오 추출 및 로드
-audio_file_path = extract_audio(video_path)
-has_audio = False
-
-if audio_file_path and os.path.exists(audio_file_path):
-    try:
-        pygame.mixer.music.load(audio_file_path)
-        pygame.mixer.music.set_volume(0.0 if muted else current_volume)
-        pygame.mixer.music.play(loops=-1)  # 무한 반복 재생
-        has_audio = True
-        print(f"Audio loaded and playing. Muted: {muted}, Volume: {int(current_volume * 100)}%")
-    except Exception as e:
-        print(f"Warning: Failed to load audio: {e}")
-        has_audio = False
-else:
-    print("No audio track available for this video")
-
-# 비디오 FPS 가져오기 (CPU 사용률 최적화를 위해 최대 30 FPS로 제한)
-video_fps = cap.get(cv2.CAP_PROP_FPS)
-if video_fps <= 0 or video_fps > 120:  # 유효하지 않은 FPS 값 처리
-    video_fps = 30.0
-    print(f"Warning: Invalid FPS detected, using default 30 FPS")
-else:
-    print(f"Video original FPS: {video_fps}")
-    # CPU 사용률 최적화: 배경화면은 30 FPS로도 충분히 부드러움
-    if video_fps > 30:
-        video_fps = 30.0
-        print(f"FPS limited to 30 for better performance")
-
-# 비디오 길이 계산 (초 단위)
-total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-video_duration = total_frames / video_fps if video_fps > 0 else 0
-print(f"Video duration: {video_duration:.2f} seconds ({total_frames} frames)")
-
-# 메모리 재사용 최적화: 프레임 버퍼 미리 할당 (GC 오버헤드 제거)
-print("Allocating frame buffer for memory optimization...")
-frame_buffer_rgb = np.empty((work_area_height, work_area_width, 3), dtype=np.uint8)
-print("✓ Frame buffer allocated")
-
-clock = pygame.time.Clock()
-running = True
-
-try:
-    import time
-    while running:
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                running = False
-
-        # 설정 버튼 클릭 처리
-        if settings_clicked:
-            settings_clicked = False
-
-            # 설정 창이 이미 열려있지 않으면 새로 열기
-            if settings_window is None or not settings_window.is_open():
-                print("Opening settings window...")
-
-                # 오디오/비디오 싱크 문제 해결: 설정 창 열 때 처음부터 재시작
-                print("Restarting video and audio for sync...")
-                cap.set(cv2.CAP_PROP_POS_FRAMES, 0)  # 비디오 처음으로
-                if has_audio:
-                    pygame.mixer.music.rewind()  # 오디오 처음으로
-                print("Video and audio restarted successfully")
-
-                settings_window = settings_gui.show_settings_window()
-
-        # 설정 창이 열려있으면 업데이트
-        if settings_window is not None and settings_window.is_open():
-            settings_window.update_window()
-        elif settings_window is not None and not settings_window.is_open():
+        # 설정 창 업데이트
+        if self.settings_window is not None and self.settings_window.is_open():
+            self.settings_window.update_window()
+        elif self.settings_window is not None and not self.settings_window.is_open():
             # 설정 창이 닫혔을 때 처리
 
             # 종료 플래그 확인
-            if settings_window.quit_app:
-                print("User requested to quit application")
-                running = False
-                settings_window = None
-                continue
+            if self.settings_window.quit_app:
+                logger.info("User requested to quit")
+                self.running = False
+                self.settings_window = None
+                return
 
-            result = settings_window.get_result()
+            # 새 비디오 선택 확인
+            result = self.settings_window.get_result()
             if result:
-                # 새 동영상이 선택되면 동영상 재로드
-                print(f"Video change requested: {result}")
-                reload_video = True
+                logger.info(f"Video change requested: {result}")
+                self.reload_video_flag = True
 
-            # 설정이 변경되었을 수 있으므로 볼륨, mute, 투명도 상태 다시 로드
+            # 설정 다시 로드
             new_volume = config.get_volume()
             new_muted = config.get_muted()
             new_icon_opacity = config.get_actual_icon_opacity()
 
-            if new_volume != current_volume or new_muted != muted or new_icon_opacity != icon_opacity:
-                current_volume = new_volume
-                muted = new_muted
-                icon_opacity = new_icon_opacity
-                mouse_clicked = True  # 볼륨 업데이트 트리거
-                print(f"Settings updated - Volume: {int(current_volume * 100)}%, Muted: {muted}, Icon Opacity: {int(config.get_icon_opacity())}%")
+            if new_volume != self.current_volume or new_muted != self.muted or new_icon_opacity != self.icon_opacity:
+                self.current_volume = new_volume
+                self.muted = new_muted
+                self.icon_opacity = new_icon_opacity
+                self.ui_manager.set_icon_opacity(new_icon_opacity)
+                self.mouse_clicked = True
+                logger.info(f"Settings updated - Volume: {int(self.current_volume * 100)}%, Muted: {self.muted}")
 
-            settings_window = None  # 설정 창 객체 정리
+            self.settings_window = None
 
-        # 음소거 상태 또는 볼륨이 변경되었으면 볼륨 조절
-        if mouse_clicked:
-            if has_audio:
-                if muted:
-                    pygame.mixer.music.set_volume(0.0)
+    def handle_audio_update(self):
+        """오디오 볼륨/음소거 업데이트"""
+        if self.mouse_clicked:
+            if self.audio_manager.has_audio:
+                if self.muted:
+                    self.audio_manager.set_muted(True)
                 else:
-                    pygame.mixer.music.set_volume(current_volume)
-            mouse_clicked = False
+                    self.audio_manager.set_muted(False)
+                    self.audio_manager.set_volume(self.current_volume)
+            self.mouse_clicked = False
 
-        # 동영상 재로드 처리
-        if reload_video:
-            reload_video = False
-            new_video_path = config.get_video_path()
+    def handle_video_reload(self):
+        """비디오 재로드 처리"""
+        if not self.reload_video_flag:
+            return
 
-            if new_video_path and os.path.exists(new_video_path):
-                print(f"\n{'='*50}")
-                print(f"Changing video to: {os.path.basename(new_video_path)}")
-                print(f"{'='*50}")
+        self.reload_video_flag = False
+        new_video_path = config.get_video_path()
 
-                # 기존 리소스 정리
-                print("Releasing current video resources...")
-                cap.release()
-                if has_audio:
-                    pygame.mixer.music.stop()
+        if new_video_path and os.path.exists(new_video_path):
+            logger.info(f"Reloading video: {os.path.basename(new_video_path)}")
 
-                # 새 동영상 로드 (하드웨어 가속 사용)
-                print(f"Loading new video with hardware acceleration: {new_video_path}")
-                try:
-                    cap = cv2.VideoCapture(new_video_path, cv2.CAP_MSMF,
-                                          [cv2.CAP_PROP_HW_ACCELERATION, cv2.VIDEO_ACCELERATION_ANY])
-                    if cap.isOpened():
-                        print("✓ Hardware acceleration enabled for new video")
-                    else:
-                        print("Hardware acceleration failed, trying software decoding...")
-                        cap = cv2.VideoCapture(new_video_path)
-                except Exception as e:
-                    print(f"Hardware acceleration error: {e}")
-                    cap = cv2.VideoCapture(new_video_path)
+            # 오디오 정리
+            self.audio_manager.cleanup()
 
-                if not cap.isOpened():
-                    print(f"ERROR: Failed to open video: {new_video_path}")
-                else:
-                    print("Video loaded successfully!")
-
-                    # 새 비디오의 FPS 가져오기 (CPU 최적화를 위해 최대 30 FPS로 제한)
-                    video_fps = cap.get(cv2.CAP_PROP_FPS)
-                    if video_fps <= 0 or video_fps > 120:
-                        video_fps = 30.0
-                        print(f"Warning: Invalid FPS detected, using default 30 FPS")
-                    else:
-                        print(f"New video original FPS: {video_fps}")
-                        if video_fps > 30:
-                            video_fps = 30.0
-                            print(f"FPS limited to 30 for better performance")
-
-                    # 비디오 길이 계산
-                    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-                    video_duration = total_frames / video_fps if video_fps > 0 else 0
-                    print(f"New video duration: {video_duration:.2f} seconds ({total_frames} frames)")
-
-                    # 비디오 경로 업데이트
-                    video_path = new_video_path
-
-                    # 새 오디오 추출 및 로드
-                    try:
-                        print("Extracting and loading audio from new video...")
-                        audio_file_path = extract_audio(new_video_path)
-
-                        if audio_file_path and os.path.exists(audio_file_path):
-                            pygame.mixer.music.load(audio_file_path)
-                            volume = config.get_volume()
-                            pygame.mixer.music.set_volume(0.0 if muted else volume)
-                            pygame.mixer.music.play(loops=-1)
-                            has_audio = True
-                            print(f"Audio loaded successfully! (Muted: {muted}, Volume: {int(volume * 100)}%)")
-                        else:
-                            print("Warning: New video has no audio track")
-                            has_audio = False
-
-                        print(f"{'='*50}")
-                        print("Video change completed successfully!")
-                        print(f"{'='*50}\n")
-                    except Exception as e:
-                        print(f"ERROR: Failed to load audio from new video: {e}")
-                        import traceback
-                        traceback.print_exc()
-                        has_audio = False
+            # 비디오 재로드
+            if self.load_video(new_video_path):
+                logger.info("Video reloaded successfully")
             else:
-                print(f"ERROR: Video file not found: {new_video_path}")
+                logger.error("Failed to reload video")
+        else:
+            logger.error(f"Video file not found: {new_video_path}")
 
-        # 아이콘 표시 타이머 체크
+    def check_config_updates(self):
+        """설정 파일 변경 감지 (주기적)"""
         current_time = time.time()
-        if current_time - last_mouse_move_time > icon_show_duration:
-            show_icons = False
+        if current_time - self.last_config_check_time < self.config_check_interval:
+            return
 
-        # 설정 변경 감지 및 실시간 업데이트 (주기적으로만 체크)
-        if current_time - last_config_check_time > config_check_interval:
-            last_config_check_time = current_time
+        self.last_config_check_time = current_time
 
-            new_volume = config.get_volume()
-            new_muted = config.get_muted()
-            new_icon_opacity = config.get_actual_icon_opacity()
+        new_volume = config.get_volume()
+        new_muted = config.get_muted()
+        new_icon_opacity = config.get_actual_icon_opacity()
 
-            # 볼륨이나 음소거 상태가 변경되었으면 오디오 볼륨 업데이트
-            if new_volume != current_volume or new_muted != muted:
-                current_volume = new_volume
-                muted = new_muted
-                if has_audio:
-                    if muted:
-                        pygame.mixer.music.set_volume(0.0)
-                    else:
-                        pygame.mixer.music.set_volume(current_volume)
+        # 볼륨/음소거 변경
+        if new_volume != self.current_volume or new_muted != self.muted:
+            self.current_volume = new_volume
+            self.muted = new_muted
+            if self.audio_manager.has_audio:
+                if self.muted:
+                    self.audio_manager.set_muted(True)
+                else:
+                    self.audio_manager.set_volume(self.current_volume)
 
-            # 투명도가 변경되었으면 업데이트
-            if new_icon_opacity != icon_opacity:
-                icon_opacity = new_icon_opacity
+        # 투명도 변경
+        if new_icon_opacity != self.icon_opacity:
+            self.icon_opacity = new_icon_opacity
+            self.ui_manager.set_icon_opacity(new_icon_opacity)
 
-        ret, frame = cap.read()
-        if not ret:
-            # 영상이 끝났으므로 비디오와 오디오를 동시에 재시작 (싱크 유지)
-            print("Video ended, looping...")
-            cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-            if has_audio:
-                pygame.mixer.music.rewind()  # 오디오도 처음부터 재시작
-            continue
+    def check_idle_mode(self):
+        """
+        Idle 모드 체크
 
-        # OpenCV는 BGR, pygame은 RGB 사용
-        # INTER_AREA: 다운스케일링에 최적화된 보간 방법 (CPU 사용률 감소 + 품질 우수)
-        # 메모리 재사용: 미리 할당된 버퍼 사용 (GC 오버헤드 제거)
-        cv2.cvtColor(frame, cv2.COLOR_BGR2RGB, dst=frame)  # in-place 변환
-        cv2.resize(frame, (work_area_width, work_area_height),
-                   dst=frame_buffer_rgb, interpolation=cv2.INTER_AREA)
+        Returns:
+            bool: Idle 상태 여부
+        """
+        current_time = time.time()
 
-        # numpy 배열을 pygame surface로 변환
-        # swapaxes는 view를 반환하므로 메모리 복사 없음 (메모리 효율적)
-        surface = pygame.surfarray.make_surface(frame_buffer_rgb.swapaxes(0, 1))
+        if current_time - self.last_activity_time > self.idle_threshold:
+            if not self.is_idle:
+                self.is_idle = True
+                if self.video_capture:
+                    self.video_capture.pause()
+                logger.info("Idle mode activated")
+            return True
+        else:
+            if self.is_idle:
+                self.is_idle = False
+                if self.video_capture:
+                    self.video_capture.resume()
+                self.last_activity_time = current_time
+                logger.info("Idle mode deactivated")
+            return False
+
+    def process_frame(self):
+        """
+        프레임 처리 및 렌더링
+
+        Returns:
+            bool: 성공 여부
+        """
+        # Idle 모드 처리
+        if self.check_idle_mode():
+            # Idle 상태 - 마지막 프레임 유지
+            if self.last_frame_surface:
+                self.screen.blit(self.last_frame_surface, (0, 0))
+            return True
+
+        # 동적 FPS 조절
+        if self.performance_monitor:
+            new_fps, changed = self.performance_monitor.adjust_fps()
+            if changed and self.video_capture:
+                self.video_capture.update_fps(new_fps)
+
+        # 프레임 읽기
+        if not self.video_capture:
+            return False
+
+        ret, frame = self.video_capture.read(timeout=1.0)
+
+        if not ret or frame is None:
+            # 프레임 읽기 실패 - 마지막 프레임 유지
+            if self.last_frame_surface:
+                self.screen.blit(self.last_frame_surface, (0, 0))
+            self.performance_monitor.record_frame(dropped=True)
+            return True
+
+        # OpenCV BGR → RGB
+        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+        # numpy → pygame surface
+        frame = frame.swapaxes(0, 1)  # (height, width, 3) → (width, height, 3)
+        surface = pygame.surfarray.make_surface(frame)
+
+        # pygame.transform.scale로 리사이징
+        surface = pygame.transform.scale(surface, (self.work_area_width, self.work_area_height))
+
+        # 마지막 프레임 저장
+        self.last_frame_surface = surface
 
         # 화면에 그리기
-        screen.blit(surface, (0, 0))
+        self.screen.blit(surface, (0, 0))
 
-        # 아이콘이 표시되어야 할 때만 렌더링
-        if show_icons:
-            # 호버 효과: 스케일 및 밝기 증가
-            hover_scale = 1.15
+        # 성능 기록
+        self.performance_monitor.record_frame(dropped=False)
 
-            # 투명도를 alpha 값으로 변환 (0.2-1.0 → 51-255)
-            alpha_value = int(icon_opacity * 255)
+        return True
 
-            # 음소거 버튼 아이콘
-            if muted:
-                icon_to_draw = mute_icon.copy()
-            else:
-                icon_to_draw = volume_icon.copy()
+    def run(self):
+        """메인 실행 루프"""
+        try:
+            logger.info("Starting main loop")
 
-            icon_to_draw.set_alpha(alpha_value)
+            # 비디오 로드
+            if not self.load_video(self.video_path):
+                logger.error("Failed to load initial video")
+                return
 
-            if hovered_button == 'mute':
-                # 호버 시 크기 증가 및 백그라운드 추가
-                scaled_size = int(button_size * hover_scale)
-                scaled_icon = pygame.transform.scale(icon_to_draw, (scaled_size, scaled_size))
-                offset = (button_size - scaled_size) // 2
+            # 마우스 입력 스레드 시작
+            self.start_mouse_thread()
 
-                # 반투명 원형 배경 (투명도 적용)
-                glow_surface = pygame.Surface((scaled_size, scaled_size), pygame.SRCALPHA)
-                glow_alpha = int(80 * icon_opacity)
-                pygame.draw.circle(glow_surface, (255, 255, 255, glow_alpha), (scaled_size // 2, scaled_size // 2), scaled_size // 2)
-                screen.blit(glow_surface, (mute_button_x + offset, mute_button_y + offset))
+            # 메인 루프
+            while self.running:
+                # pygame 이벤트 처리
+                for event in pygame.event.get():
+                    if event.type == pygame.QUIT:
+                        self.running = False
 
-                screen.blit(scaled_icon, (mute_button_x + offset, mute_button_y + offset))
-            else:
-                screen.blit(icon_to_draw, (mute_button_x, mute_button_y))
+                # 설정 창 처리
+                self.handle_settings_window()
+                if not self.running:
+                    break
 
-            # 설정 버튼 아이콘
-            settings_icon_copy = settings_icon.copy()
-            settings_icon_copy.set_alpha(alpha_value)
+                # 오디오 업데이트
+                self.handle_audio_update()
 
-            if hovered_button == 'settings':
-                # 호버 시 크기 증가 및 백그라운드 추가
-                scaled_size = int(button_size * hover_scale)
-                scaled_icon = pygame.transform.scale(settings_icon_copy, (scaled_size, scaled_size))
-                offset = (button_size - scaled_size) // 2
+                # 비디오 재로드
+                self.handle_video_reload()
 
-                # 반투명 원형 배경 (투명도 적용)
-                glow_surface = pygame.Surface((scaled_size, scaled_size), pygame.SRCALPHA)
-                glow_alpha = int(80 * icon_opacity)
-                pygame.draw.circle(glow_surface, (255, 255, 255, glow_alpha), (scaled_size // 2, scaled_size // 2), scaled_size // 2)
-                screen.blit(glow_surface, (settings_button_x + offset, settings_button_y + offset))
+                # 설정 변경 감지
+                self.check_config_updates()
 
-                screen.blit(scaled_icon, (settings_button_x + offset, settings_button_y + offset))
-            else:
-                screen.blit(settings_icon_copy, (settings_button_x, settings_button_y))
+                # Idle 체크
+                self.ui_manager.check_idle()
 
-            # 음량 조절바 렌더링 (투명도 적용)
-            # 투명한 Surface 생성
-            slider_surface = pygame.Surface((volume_slider_width + 80, 40), pygame.SRCALPHA)
+                # 프레임 처리
+                self.process_frame()
 
-            # 배경 바 (회색)
-            slider_bg_rect = pygame.Rect(0, 15, volume_slider_width, volume_slider_height)
-            bg_color = (100, 100, 100, alpha_value)
-            pygame.draw.rect(slider_surface, bg_color, slider_bg_rect, border_radius=5)
+                # UI 렌더링
+                self.ui_manager.render(self.screen, self.muted, self.current_volume)
 
-            # 채워진 부분 (흰색 또는 음소거 시 회색)
-            filled_width = int(volume_slider_width * current_volume)
-            if filled_width > 0:
-                filled_rect = pygame.Rect(0, 15, filled_width, volume_slider_height)
-                if muted:
-                    filled_color = (150, 150, 150, alpha_value)
+                # 화면 업데이트
+                pygame.display.flip()
+
+                # FPS 제어
+                if self.performance_monitor:
+                    self.clock.tick(self.performance_monitor.target_fps)
                 else:
-                    filled_color = (255, 255, 255, alpha_value)
-                pygame.draw.rect(slider_surface, filled_color, filled_rect, border_radius=5)
+                    self.clock.tick(30)
 
-            # 슬라이더 핸들 (원형)
-            handle_x = filled_width
-            handle_y = 15 + volume_slider_height // 2
-            handle_radius = 8
-            handle_color = (255, 255, 255, alpha_value)
-            pygame.draw.circle(slider_surface, handle_color, (handle_x, handle_y), handle_radius)
+        except KeyboardInterrupt:
+            logger.info("Interrupted by user (Ctrl+C)")
+        except Exception as e:
+            logger.critical(f"Fatal error in main loop: {e}", exc_info=True)
+        finally:
+            self.cleanup()
 
-            # 음량 퍼센트 표시
-            font = pygame.font.Font(None, 24)
-            volume_percent = int(current_volume * 100)
-            volume_text = font.render(f"{volume_percent}%", True, (255, 255, 255))
-            volume_text.set_alpha(alpha_value)
-            slider_surface.blit(volume_text, (volume_slider_width + 10, 10))
+    def cleanup(self):
+        """리소스 정리"""
+        logger.info("Cleaning up resources...")
 
-            # 완성된 슬라이더를 화면에 그리기
-            screen.blit(slider_surface, (volume_slider_x, volume_slider_y - 15))
+        # 비디오 캡처 정리
+        if self.video_capture:
+            try:
+                self.video_capture.release()
+            except Exception as e:
+                logger.error(f"Error releasing video capture: {e}")
 
-        pygame.display.flip()
+        # 오디오 정리
+        if self.audio_manager:
+            try:
+                self.audio_manager.cleanup()
+            except Exception as e:
+                logger.error(f"Error cleaning up audio: {e}")
 
-        # 비디오 FPS에 맞춰 재생 속도 조절
-        clock.tick(video_fps)
+        # pygame 종료
+        try:
+            pygame.quit()
+        except Exception as e:
+            logger.error(f"Error quitting pygame: {e}")
 
-except KeyboardInterrupt:
-    print("Program terminated by user.")
-finally:
-    cap.release()
-    if has_audio:
-        pygame.mixer.music.stop()
-    pygame.quit()
+        # 성능 통계 출력
+        if self.performance_monitor:
+            stats = self.performance_monitor.get_stats()
+            logger.info("=" * 70)
+            logger.info("Performance Statistics:")
+            logger.info(f"  Total Frames: {stats['total_frames']}")
+            logger.info(f"  Dropped Frames: {stats['dropped_frames']}")
+            logger.info(f"  Drop Rate: {stats['drop_rate']:.2f}%")
+            logger.info(f"  Final Target FPS: {stats['target_fps']}")
+            logger.info(f"  Avg CPU Usage: {stats['cpu_avg']:.1f}%")
+            logger.info("=" * 70)
+
+        logger.info("Cleanup complete. Exiting.")
+
+
+def main():
+    """진입점"""
+    try:
+        app = WallpaperApp()
+        app.run()
+    except Exception as e:
+        logger.critical(f"Failed to start application: {e}", exc_info=True)
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

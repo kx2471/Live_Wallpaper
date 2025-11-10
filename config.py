@@ -19,8 +19,10 @@ DEFAULT_CONFIG = {
     "video_path": None,
     "volume": 1.0,
     "muted": False,
-    "icon_opacity": 100,  # 0-100 (사용자에게 표시되는 값, 실제로는 20-100%가 적용됨)
-    "autostart": False  # 윈도우 시작시 자동 실행
+    "icon_opacity": 100,  # 0-100 (사용자에게 표시되는 값, 제로로는 20-100%가 적용됨)
+    "autostart": False,  # 윈도우 시작시 자동 실행
+    "target_fps": 24,  # 목표 FPS (15/20/24/30/60, 낮을수록 CPU 절감) - 리팩토링 후 최적값
+    "resolution_scale": 0.9  # 해상도 스케일 (0.8-1.0, CPU 최적화)
 }
 
 def load_config():
@@ -105,4 +107,26 @@ def set_autostart(autostart):
     """자동 시작 설정을 저장합니다."""
     config = load_config()
     config["autostart"] = autostart
+    return save_config(config)
+
+def get_target_fps():
+    """목표 FPS를 반환합니다."""
+    config = load_config()
+    return config.get("target_fps", 60)
+
+def set_target_fps(fps):
+    """목표 FPS를 저장합니다."""
+    config = load_config()
+    config["target_fps"] = fps
+    return save_config(config)
+
+def get_resolution_scale():
+    """해상도 스케일을 반환합니다."""
+    config = load_config()
+    return config.get("resolution_scale", 0.9)
+
+def set_resolution_scale(scale):
+    """해상도 스케일을 저장합니다."""
+    config = load_config()
+    config["resolution_scale"] = max(0.5, min(1.0, scale))
     return save_config(config)

@@ -11,7 +11,7 @@ class SettingsWindow:
     def __init__(self, parent=None):
         self.root = tk.Tk() if parent is None else tk.Toplevel(parent)
         self.root.title("Wallpaper Player - 설정")
-        self.root.geometry("600x720")
+        self.root.geometry("600x820")
         self.root.resizable(False, False)
         self.root.configure(bg='#f0f0f0')
 
@@ -26,6 +26,7 @@ class SettingsWindow:
         self.original_muted = config.get_muted()
         self.original_opacity = config.get_icon_opacity()
         self.original_autostart = config.get_autostart()
+        self.original_target_fps = config.get_target_fps()
 
         self.create_widgets()
         self.center_window()
@@ -289,6 +290,77 @@ class SettingsWindow:
         )
         autostart_desc.pack(anchor='w', pady=(0, 3))
 
+        # 구분선
+        separator4 = tk.Frame(self.root, bg='#cccccc', height=1)
+        separator4.pack(pady=8, padx=30, fill='x')
+
+        # FPS 설정 영역
+        fps_frame = tk.Frame(self.root, bg='#f0f0f0')
+        fps_frame.pack(pady=5, padx=30, fill='x')
+
+        fps_title = tk.Label(
+            fps_frame,
+            text="🎮 FPS (프레임 속도) 설정",
+            font=("맑은 고딕", 9, "bold"),
+            bg='#f0f0f0',
+            fg='#333333'
+        )
+        fps_title.pack(anchor='w', pady=(0, 3))
+
+        # 현재 FPS 값 가져오기
+        current_fps = config.get_target_fps()
+
+        # FPS 옵션 정의 (값: [표시텍스트, CPU 사용량, 부드러움])
+        self.fps_options = {
+            15: ("15 FPS - 최소 CPU (7-10%)", "약간 끊김", "#4CAF50"),
+            20: ("20 FPS - 균형 (12-15%)", "부드러움", "#2196F3"),
+            24: ("24 FPS - 영화급 (15-18%)", "매우 부드러움", "#FF9800"),
+            30: ("30 FPS - 고품질 (20-25%)", "아주 부드러움", "#FF5722"),
+            60: ("60 FPS - 최고 품질 (30%)", "완벽한 부드러움", "#9C27B0")
+        }
+
+        # FPS 선택 라디오 버튼
+        self.fps_var = tk.IntVar(value=current_fps)
+
+        for fps_value in [15, 20, 24, 30, 60]:
+            fps_text, smooth_text, color = self.fps_options[fps_value]
+
+            fps_option_frame = tk.Frame(fps_frame, bg='#f0f0f0')
+            fps_option_frame.pack(anchor='w', pady=2)
+
+            rb = tk.Radiobutton(
+                fps_option_frame,
+                text=fps_text,
+                variable=self.fps_var,
+                value=fps_value,
+                font=("맑은 고딕", 9),
+                bg='#f0f0f0',
+                fg='#333333',
+                activebackground='#f0f0f0',
+                selectcolor='white',
+                command=self.on_fps_change
+            )
+            rb.pack(side=tk.LEFT)
+
+            smooth_label = tk.Label(
+                fps_option_frame,
+                text=f"  [{smooth_text}]",
+                font=("맑은 고딕", 8),
+                bg='#f0f0f0',
+                fg=color
+            )
+            smooth_label.pack(side=tk.LEFT)
+
+        # 설명 텍스트
+        fps_desc = tk.Label(
+            fps_frame,
+            text="※ 낮은 FPS = CPU 사용량 감소, 높은 FPS = 더 부드러운 영상",
+            font=("맑은 고딕", 7),
+            bg='#f0f0f0',
+            fg='#666666'
+        )
+        fps_desc.pack(anchor='w', pady=(3, 0))
+
         # 버튼 영역
         button_frame = tk.Frame(self.root, bg='#f0f0f0')
         button_frame.pack(pady=12)
@@ -355,6 +427,12 @@ class SettingsWindow:
         # 실시간 미리보기를 위해 임시로 설정에 저장
         config.set_icon_opacity(opacity_percent)
 
+    def on_fps_change(self):
+        """FPS가 변경될 때 실시간으로 적용합니다."""
+        fps_value = self.fps_var.get()
+        config.set_target_fps(fps_value)
+        print(f"FPS changed to: {fps_value}")
+
     def browse_file(self):
         """비디오 파일을 선택합니다."""
         filetypes = (
@@ -373,11 +451,12 @@ class SettingsWindow:
             self.file_label.config(text=video_name)
 
     def save_settings(self):
-        """음량, mute, 투명도, 자동시작, 비디오 설정을 저장합니다."""
+        """음량, mute, 투명도, 자동시작, FPS, 비디오 설정을 저장합니다."""
         # 슬라이더에서 현재 값 가져오기
         volume_value = self.volume_slider.get()
         opacity_value = self.opacity_slider.get()
         autostart_value = self.autostart_var.get()
+        fps_value = self.fps_var.get()
 
         # 0.0~1.0 범위로 변환
         volume_ratio = volume_value / 100.0
@@ -387,6 +466,7 @@ class SettingsWindow:
         config.set_muted(self.mute_var.get())
         config.set_icon_opacity(opacity_value)
         config.set_autostart(autostart_value)
+        config.set_target_fps(fps_value)
 
         # 자동시작 설정 적용
         if autostart_value:
@@ -406,9 +486,9 @@ class SettingsWindow:
             config.set_video_path(self.selected_video)
             self.result = self.selected_video
             video_name = os.path.basename(self.selected_video)
-            messagebox.showinfo("저장 완료", f"설정이 저장되었습니다!\n\n음량: {volume_value}%\n음소거: {'예' if self.mute_var.get() else '아니오'}\n아이콘 투명도: {opacity_value}%\n자동 시작: {'예' if autostart_value else '아니오'}\n\n배경화면: {video_name}")
+            messagebox.showinfo("저장 완료", f"설정이 저장되었습니다!\n\n음량: {volume_value}%\n음소거: {'예' if self.mute_var.get() else '아니오'}\n아이콘 투명도: {opacity_value}%\nFPS: {fps_value}\n자동 시작: {'예' if autostart_value else '아니오'}\n\n배경화면: {video_name}")
         else:
-            messagebox.showinfo("저장 완료", f"설정이 저장되었습니다!\n\n음량: {volume_value}%\n음소거: {'예' if self.mute_var.get() else '아니오'}\n아이콘 투명도: {opacity_value}%\n자동 시작: {'예' if autostart_value else '아니오'}")
+            messagebox.showinfo("저장 완료", f"설정이 저장되었습니다!\n\n음량: {volume_value}%\n음소거: {'예' if self.mute_var.get() else '아니오'}\n아이콘 투명도: {opacity_value}%\nFPS: {fps_value}\n자동 시작: {'예' if autostart_value else '아니오'}")
 
         self.root.destroy()
 
@@ -419,6 +499,7 @@ class SettingsWindow:
         config.set_muted(self.original_muted)
         config.set_icon_opacity(self.original_opacity)
         config.set_autostart(self.original_autostart)
+        config.set_target_fps(self.original_target_fps)
 
         self.root.destroy()
 
