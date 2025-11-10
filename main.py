@@ -368,10 +368,9 @@ video_duration = total_frames / video_fps if video_fps > 0 else 0
 print(f"Video duration: {video_duration:.2f} seconds ({total_frames} frames)")
 
 # 메모리 재사용 최적화: 프레임 버퍼 미리 할당 (GC 오버헤드 제거)
-print("Allocating frame buffers for memory optimization...")
+print("Allocating frame buffer for memory optimization...")
 frame_buffer_rgb = np.empty((work_area_height, work_area_width, 3), dtype=np.uint8)
-frame_buffer_transposed = np.empty((work_area_width, work_area_height, 3), dtype=np.uint8)
-print("✓ Frame buffers allocated")
+print("✓ Frame buffer allocated")
 
 clock = pygame.time.Clock()
 running = True
@@ -567,9 +566,8 @@ try:
                    dst=frame_buffer_rgb, interpolation=cv2.INTER_AREA)
 
         # numpy 배열을 pygame surface로 변환
-        # transpose를 사용하여 메모리 재사용
-        np.transpose(frame_buffer_rgb, (1, 0, 2), out=frame_buffer_transposed)
-        surface = pygame.surfarray.make_surface(frame_buffer_transposed)
+        # swapaxes는 view를 반환하므로 메모리 복사 없음 (메모리 효율적)
+        surface = pygame.surfarray.make_surface(frame_buffer_rgb.swapaxes(0, 1))
 
         # 화면에 그리기
         screen.blit(surface, (0, 0))
