@@ -9,6 +9,7 @@ import threading
 import sys
 import config
 import settings_gui
+import numpy as np
 
 # moviepy import for audio extraction
 from moviepy.editor import VideoFileClip
@@ -310,7 +311,22 @@ mouse_thread.start()
 
 # 동영상 및 오디오 재생 준비
 print("Loading video with audio...")
-cap = cv2.VideoCapture(video_path)
+# 하드웨어 가속 비디오 디코딩 활성화 (CPU 사용률 대폭 감소)
+# CAP_MSMF: Windows Media Foundation (Windows 전용, 가장 안정적)
+# CAP_PROP_HW_ACCELERATION: GPU 하드웨어 디코더 사용
+try:
+    print("Attempting hardware-accelerated video decoding...")
+    cap = cv2.VideoCapture(video_path, cv2.CAP_MSMF,
+                          [cv2.CAP_PROP_HW_ACCELERATION, cv2.VIDEO_ACCELERATION_ANY])
+    if cap.isOpened():
+        print("✓ Hardware acceleration enabled (GPU decoding)")
+    else:
+        print("Hardware acceleration failed, falling back to software decoding...")
+        cap = cv2.VideoCapture(video_path)
+except Exception as e:
+    print(f"Hardware acceleration not available: {e}")
+    print("Using software decoding...")
+    cap = cv2.VideoCapture(video_path)
 
 if not cap.isOpened():
     print(f"Failed to open video: {video_path}")
@@ -350,6 +366,12 @@ else:
 total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 video_duration = total_frames / video_fps if video_fps > 0 else 0
 print(f"Video duration: {video_duration:.2f} seconds ({total_frames} frames)")
+
+# 메모리 재사용 최적화: 프레임 버퍼 미리 할당 (GC 오버헤드 제거)
+print("Allocating frame buffers for memory optimization...")
+frame_buffer_rgb = np.empty((work_area_height, work_area_width, 3), dtype=np.uint8)
+frame_buffer_transposed = np.empty((work_area_width, work_area_height, 3), dtype=np.uint8)
+print("✓ Frame buffers allocated")
 
 clock = pygame.time.Clock()
 running = True
@@ -436,9 +458,19 @@ try:
                 if has_audio:
                     pygame.mixer.music.stop()
 
-                # 새 동영상 로드
-                print(f"Loading new video: {new_video_path}")
-                cap = cv2.VideoCapture(new_video_path)
+                # 새 동영상 로드 (하드웨어 가속 사용)
+                print(f"Loading new video with hardware acceleration: {new_video_path}")
+                try:
+                    cap = cv2.VideoCapture(new_video_path, cv2.CAP_MSMF,
+                                          [cv2.CAP_PROP_HW_ACCELERATION, cv2.VIDEO_ACCELERATION_ANY])
+                    if cap.isOpened():
+                        print("✓ Hardware acceleration enabled for new video")
+                    else:
+                        print("Hardware acceleration failed, trying software decoding...")
+                        cap = cv2.VideoCapture(new_video_path)
+                except Exception as e:
+                    print(f"Hardware acceleration error: {e}")
+                    cap = cv2.VideoCapture(new_video_path)
 
                 if not cap.isOpened():
                     print(f"ERROR: Failed to open video: {new_video_path}")
@@ -529,13 +561,15 @@ try:
 
         # OpenCV는 BGR, pygame은 RGB 사용
         # INTER_AREA: 다운스케일링에 최적화된 보간 방법 (CPU 사용률 감소 + 품질 우수)
-        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        frame = cv2.resize(frame, (work_area_width, work_area_height), interpolation=cv2.INTER_AREA)
+        # 메모리 재사용: 미리 할당된 버퍼 사용 (GC 오버헤드 제거)
+        cv2.cvtColor(frame, cv2.COLOR_BGR2RGB, dst=frame)  # in-place 변환
+        cv2.resize(frame, (work_area_width, work_area_height),
+                   dst=frame_buffer_rgb, interpolation=cv2.INTER_AREA)
 
         # numpy 배열을 pygame surface로 변환
-        # swapaxes는 view를 반환하므로 메모리 복사 없음
-        frame = frame.swapaxes(0, 1)  # (height, width, 3) -> (width, height, 3)
-        surface = pygame.surfarray.make_surface(frame)
+        # transpose를 사용하여 메모리 재사용
+        np.transpose(frame_buffer_rgb, (1, 0, 2), out=frame_buffer_transposed)
+        surface = pygame.surfarray.make_surface(frame_buffer_transposed)
 
         # 화면에 그리기
         screen.blit(surface, (0, 0))
