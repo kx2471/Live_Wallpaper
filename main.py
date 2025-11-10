@@ -92,7 +92,7 @@ class WallpaperApp:
         self.running = True
         self.is_idle = False
         self.last_activity_time = time.time()
-        self.idle_threshold = 30.0  # 30초
+        self.idle_threshold = 60.0  # 60초
 
         # 설정 로드
         self.current_volume = config.get_volume()
@@ -314,7 +314,28 @@ class WallpaperApp:
 
                 if is_in_icon_area:
                     self.ui_manager.on_mouse_move()
-                    self.last_activity_time = time.time()  # Idle 타이머 리셋
+
+                # 바탕화면 내 마우스 움직임 감지 (Idle 타이머 관리)
+                # 전략: 다른 앱 창이 최상위(foreground)가 아니면 바탕화면으로 간주
+                try:
+                    foreground_hwnd = win32gui.GetForegroundWindow()
+
+                    # 최상위 창이 없거나, 바탕화면 관련 창이거나, 우리 앱이면 타이머 리셋
+                    if foreground_hwnd == 0 or foreground_hwnd == self.hwnd:
+                        self.last_activity_time = time.time()
+                    else:
+                        # 최상위 창의 클래스 이름 확인
+                        try:
+                            fg_class = win32gui.GetClassName(foreground_hwnd)
+                            # 바탕화면 관련 창이면 타이머 리셋
+                            if fg_class in ["Progman", "WorkerW", "Shell_TrayWnd"]:
+                                self.last_activity_time = time.time()
+                            # 다른 앱 창이 활성화되어 있으면 타이머 리셋 안 함 (idle mode로 진입)
+                        except:
+                            pass
+                except:
+                    # 에러 발생 시 안전하게 타이머 리셋
+                    self.last_activity_time = time.time()
 
                 # 마우스 버튼 상태
                 current_state = win32api.GetAsyncKeyState(VK_LBUTTON) & 0x8000
