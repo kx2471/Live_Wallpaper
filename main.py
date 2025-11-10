@@ -178,7 +178,7 @@ icon_opacity = config.get_actual_icon_opacity()  # 0.2-1.0
 
 # 설정 파일 체크 최적화 (매 프레임마다 읽지 않고 주기적으로 체크)
 last_config_check_time = time.time()
-config_check_interval = 0.1  # 0.1초마다만 설정 파일 체크
+config_check_interval = 0.5  # 0.5초마다만 설정 파일 체크 (CPU 사용률 감소)
 
 # 마우스 클릭 감지 스레드
 def check_mouse_click():
@@ -302,7 +302,7 @@ def check_mouse_click():
             time.sleep(0.1)  # 에러 발생 시 잠시 대기 후 재시도
             continue
 
-        time.sleep(0.01)  # CPU 사용률 줄이기 (~100Hz, 더 빠른 반응성)
+        time.sleep(0.02)  # CPU 사용률 줄이기 (~50Hz, 충분한 반응성)
 
 # 마우스 감지 스레드 시작
 mouse_thread = threading.Thread(target=check_mouse_click, daemon=True)
@@ -334,13 +334,17 @@ if audio_file_path and os.path.exists(audio_file_path):
 else:
     print("No audio track available for this video")
 
-# 비디오 FPS 가져오기
+# 비디오 FPS 가져오기 (CPU 사용률 최적화를 위해 최대 30 FPS로 제한)
 video_fps = cap.get(cv2.CAP_PROP_FPS)
 if video_fps <= 0 or video_fps > 120:  # 유효하지 않은 FPS 값 처리
     video_fps = 30.0
     print(f"Warning: Invalid FPS detected, using default 30 FPS")
 else:
-    print(f"Video FPS: {video_fps}")
+    print(f"Video original FPS: {video_fps}")
+    # CPU 사용률 최적화: 배경화면은 30 FPS로도 충분히 부드러움
+    if video_fps > 30:
+        video_fps = 30.0
+        print(f"FPS limited to 30 for better performance")
 
 # 비디오 길이 계산 (초 단위)
 total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -441,13 +445,16 @@ try:
                 else:
                     print("Video loaded successfully!")
 
-                    # 새 비디오의 FPS 가져오기
+                    # 새 비디오의 FPS 가져오기 (CPU 최적화를 위해 최대 30 FPS로 제한)
                     video_fps = cap.get(cv2.CAP_PROP_FPS)
                     if video_fps <= 0 or video_fps > 120:
                         video_fps = 30.0
                         print(f"Warning: Invalid FPS detected, using default 30 FPS")
                     else:
-                        print(f"New video FPS: {video_fps}")
+                        print(f"New video original FPS: {video_fps}")
+                        if video_fps > 30:
+                            video_fps = 30.0
+                            print(f"FPS limited to 30 for better performance")
 
                     # 비디오 길이 계산
                     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -521,9 +528,9 @@ try:
             continue
 
         # OpenCV는 BGR, pygame은 RGB 사용
-        # INTER_LINEAR: 빠르고 품질도 좋은 보간 방법 (기본값이지만 명시적으로 설정)
+        # INTER_AREA: 다운스케일링에 최적화된 보간 방법 (CPU 사용률 감소 + 품질 우수)
         frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        frame = cv2.resize(frame, (work_area_width, work_area_height), interpolation=cv2.INTER_LINEAR)
+        frame = cv2.resize(frame, (work_area_width, work_area_height), interpolation=cv2.INTER_AREA)
 
         # numpy 배열을 pygame surface로 변환
         # swapaxes는 view를 반환하므로 메모리 복사 없음
