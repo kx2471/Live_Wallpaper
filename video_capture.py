@@ -110,7 +110,7 @@ class ThreadedVideoCapture:
 
                 # 큐가 가득 차면 대기
                 if self.queue.full():
-                    time.sleep(0.001)
+                    time.sleep(0.01)  # 0.001 -> 0.01 (10ms)
                     continue
 
                 self.frame_count += 1
@@ -134,8 +134,12 @@ class ThreadedVideoCapture:
                     continue
 
                 # 프레임을 큐에 추가
-                self.queue.put((True, frame), timeout=1.0)
-                self.consecutive_errors = 0
+                try:
+                    self.queue.put((True, frame), timeout=0.1)
+                    self.consecutive_errors = 0
+                except:
+                    # Queue put timeout - 프레임 드롭
+                    logger.warning(f"Queue put timeout (size: {self.queue.qsize()}/{self.queue_size})")
 
             except Exception as e:
                 self.consecutive_errors += 1
