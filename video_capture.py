@@ -26,11 +26,11 @@ class ThreadedVideoCapture:
     5. 프레임 재사용으로 메모리 효율 개선
     """
 
-    def __init__(self, video_path, queue_size=3, target_fps=None, video_fps=None):
+    def __init__(self, video_path, queue_size=60, target_fps=None, video_fps=None):
         """
         Args:
             video_path: 비디오 파일 경로
-            queue_size: 프레임 버퍼 크기
+            queue_size: 프레임 버퍼 크기 (기본 60 = 24fps 기준 2.5초 분량)
             target_fps: 목표 FPS (None이면 원본 FPS)
             video_fps: 원본 비디오 FPS
         """
