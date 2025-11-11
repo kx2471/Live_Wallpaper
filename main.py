@@ -545,7 +545,8 @@ class WallpaperApp:
             if self.extended_idle:
                 self.extended_idle = False
 
-            self.last_activity_time = current_time
+            # 주의: last_activity_time은 여기서 갱신하지 않음!
+            # 실제 사용자 활동(마우스/키보드/버튼 클릭)이 있을 때만 갱신됨
             return False
 
     def process_frame(self):
