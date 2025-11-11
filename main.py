@@ -235,7 +235,7 @@ class WallpaperApp:
             # ThreadedVideoCapture 생성 및 시작
             self.video_capture = ThreadedVideoCapture(
                 video_path,
-                queue_size=3,
+                queue_size=60,
                 target_fps=target_fps,
                 video_fps=video_fps
             )
