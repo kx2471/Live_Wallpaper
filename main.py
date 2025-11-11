@@ -283,6 +283,7 @@ class WallpaperApp:
         VK_LBUTTON = 0x01
         prev_state = False
         last_click_time = 0
+        prev_mouse_pos = (0, 0)  # 이전 마우스 위치 (Idle 타이머 관리용)
 
         while self.running:
             try:
@@ -317,27 +318,11 @@ class WallpaperApp:
                 if is_in_icon_area:
                     self.ui_manager.on_mouse_move()
 
-                # 바탕화면 내 마우스 움직임 감지 (Idle 타이머 관리)
-                # 전략: 다른 앱 창이 최상위(foreground)가 아니면 바탕화면으로 간주
-                try:
-                    foreground_hwnd = win32gui.GetForegroundWindow()
-
-                    # 최상위 창이 없거나, 바탕화면 관련 창이거나, 우리 앱이면 타이머 리셋
-                    if foreground_hwnd == 0 or foreground_hwnd == self.hwnd:
-                        self.last_activity_time = time.time()
-                    else:
-                        # 최상위 창의 클래스 이름 확인
-                        try:
-                            fg_class = win32gui.GetClassName(foreground_hwnd)
-                            # 바탕화면 관련 창이면 타이머 리셋
-                            if fg_class in ["Progman", "WorkerW", "Shell_TrayWnd"]:
-                                self.last_activity_time = time.time()
-                            # 다른 앱 창이 활성화되어 있으면 타이머 리셋 안 함 (idle mode로 진입)
-                        except:
-                            pass
-                except:
-                    # 에러 발생 시 안전하게 타이머 리셋
+                # 마우스 움직임 감지 (Idle 타이머 관리)
+                # 실제로 마우스 위치가 변경되었을 때만 타이머 리셋
+                if (x, y) != prev_mouse_pos:
                     self.last_activity_time = time.time()
+                    prev_mouse_pos = (x, y)
 
                 # 마우스 버튼 상태
                 current_state = win32api.GetAsyncKeyState(VK_LBUTTON) & 0x8000
