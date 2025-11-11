@@ -558,13 +558,14 @@ class WallpaperApp:
         if not self.video_capture:
             return False
 
-        ret, frame = self.video_capture.read(timeout=1.0)
+        ret, frame = self.video_capture.read(timeout=0.1)
 
         if not ret or frame is None:
             # 프레임 읽기 실패 - 마지막 프레임 유지
             if self.last_frame_surface:
                 self.screen.blit(self.last_frame_surface, (0, 0))
-            self.performance_monitor.record_frame(dropped=True)
+            # Note: performance_monitor에 dropped 프레임을 기록하지 않음
+            # (idle 복귀 시 queue가 비어있는 것은 정상이므로)
             return True
 
         # OpenCV BGR → RGB

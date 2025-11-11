@@ -212,6 +212,8 @@ class ThreadedVideoCapture:
         """Idle 모드 해제 - 프레임 디코딩 재개"""
         if self.paused:
             self.paused = False
+            # Queue를 채울 시간 확보 (프레임 드롭 경고 방지)
+            time.sleep(0.2)
             logger.info("Video capture resumed")
 
     def isOpened(self):
