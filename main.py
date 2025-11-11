@@ -555,8 +555,8 @@ class WallpaperApp:
         Returns:
             bool: 성공 여부
         """
-        # Idle 모드 처리
-        if self.check_idle_mode():
+        # Idle 모드 처리 (플래그는 main loop에서 이미 설정됨)
+        if self.is_idle:
             # Idle 상태 - 마지막 프레임 유지
             if self.last_frame_surface:
                 self.screen.blit(self.last_frame_surface, (0, 0))
@@ -636,8 +636,9 @@ class WallpaperApp:
                 # 설정 변경 감지
                 self.check_config_updates()
 
-                # Idle 체크
-                self.ui_manager.check_idle()
+                # Idle 체크 (CPU 절약 + UI 숨김)
+                self.check_idle_mode()  # 비디오 멈춤 + 자동 음소거
+                self.ui_manager.check_idle()  # UI 아이콘 숨김
 
                 # 프레임 처리
                 self.process_frame()
@@ -645,8 +646,9 @@ class WallpaperApp:
                 # UI 렌더링
                 self.ui_manager.render(self.screen, self.muted, self.current_volume)
 
-                # 화면 업데이트
-                pygame.display.flip()
+                # 화면 업데이트 (Idle 상태일 때는 스킵하여 CPU 절약)
+                if not self.is_idle:
+                    pygame.display.flip()
 
                 # FPS 제어 (Idle 상태일 때 1 FPS로 낮춤)
                 if self.is_idle:
