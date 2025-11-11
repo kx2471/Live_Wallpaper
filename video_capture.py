@@ -67,6 +67,10 @@ class ThreadedVideoCapture:
         self.consecutive_errors = 0
         self.max_consecutive_errors = 10
 
+        # grab() 실패 추적 (무한 루프 방지)
+        self.consecutive_grab_fails = 0
+        self.max_grab_fails = 50  # 50번 연속 실패 시 경고
+
         logger.info(
             f"ThreadedVideoCapture initialized: {video_path}, "
             f"video_fps={video_fps}, target_fps={target_fps}, skip_ratio={self.skip_ratio}"
@@ -133,8 +137,20 @@ class ThreadedVideoCapture:
                     ret = self.cap.grab()
                     logger.debug(f"cap.grab() returned: {ret}")
                     if not ret:
-                        # 비디오 끝 - 루프 재시작
-                        self._restart_video()
+                        self.consecutive_grab_fails += 1
+
+                        # grab() 실패 추적 (무한 루프 감지)
+                        if self.consecutive_grab_fails >= self.max_grab_fails:
+                            logger.warning(f"cap.grab() failed {self.consecutive_grab_fails} times consecutively - forcing restart")
+                            self._restart_video()
+                            self.consecutive_grab_fails = 0
+                        else:
+                            # 비디오 끝 - 루프 재시작
+                            logger.info(f"[GRAB_FAIL] cap.grab() failed (consecutive: {self.consecutive_grab_fails}), restarting video")
+                            self._restart_video()
+                    else:
+                        # grab() 성공 시 카운터 리셋
+                        self.consecutive_grab_fails = 0
                     continue
 
                 # 필요한 프레임만 실제로 디코딩
@@ -147,14 +163,18 @@ class ThreadedVideoCapture:
                     logger.debug("Restarting video (EOF or read failed)")
                     self._restart_video()
                     self.consecutive_errors = 0
+                    self.consecutive_grab_fails = 0  # read 실패 시에도 grab_fail 리셋
                     continue
+
+                # read() 성공 - 모든 카운터 리셋
+                self.consecutive_errors = 0
+                self.consecutive_grab_fails = 0
 
                 # 프레임을 큐에 추가
                 try:
                     logger.debug(f"Putting frame to queue (size: {self.queue.qsize()}/{self.queue_size})")
                     self.queue.put((True, frame), timeout=0.1)
                     logger.debug("Frame added to queue successfully")
-                    self.consecutive_errors = 0
                 except:
                     # Queue put timeout - 프레임 드롭
                     logger.warning(f"Queue put timeout (size: {self.queue.qsize()}/{self.queue_size})")
