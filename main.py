@@ -603,6 +603,23 @@ class WallpaperApp:
 
             # 메인 루프
             while self.running:
+                # Idle 체크 (가장 먼저 - CPU 절약 + UI 숨김)
+                self.check_idle_mode()  # 비디오 멈춤 + 자동 음소거
+                self.ui_manager.check_idle()  # UI 아이콘 숨김
+
+                # Idle 상태일 때는 최소한의 처리만 수행
+                if self.is_idle:
+                    # pygame 이벤트 처리 (QUIT 이벤트만)
+                    for event in pygame.event.get():
+                        if event.type == pygame.QUIT:
+                            self.running = False
+
+                    # Idle 상태에서는 거의 모든 처리를 건너뜀
+                    time.sleep(1.0)  # 1초 대기 (clock.tick 대신)
+                    continue
+
+                # === Active 상태 처리 ===
+
                 # pygame 이벤트 처리
                 for event in pygame.event.get():
                     if event.type == pygame.QUIT:
@@ -622,24 +639,17 @@ class WallpaperApp:
                 # 설정 변경 감지
                 self.check_config_updates()
 
-                # Idle 체크 (CPU 절약 + UI 숨김)
-                self.check_idle_mode()  # 비디오 멈춤 + 자동 음소거
-                self.ui_manager.check_idle()  # UI 아이콘 숨김
-
                 # 프레임 처리
                 self.process_frame()
 
                 # UI 렌더링
                 self.ui_manager.render(self.screen, self.muted, self.current_volume)
 
-                # 화면 업데이트 (Idle 상태일 때는 스킵하여 CPU 절약)
-                if not self.is_idle:
-                    pygame.display.flip()
+                # 화면 업데이트
+                pygame.display.flip()
 
-                # FPS 제어 (Idle 상태일 때 1 FPS로 낮춤)
-                if self.is_idle:
-                    self.clock.tick(1)  # Idle 모드: 1 FPS로 CPU 절약
-                elif self.performance_monitor:
+                # FPS 제어
+                if self.performance_monitor:
                     self.clock.tick(self.performance_monitor.target_fps)
                 else:
                     self.clock.tick(30)
