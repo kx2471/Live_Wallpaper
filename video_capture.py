@@ -212,9 +212,16 @@ class ThreadedVideoCapture:
         """Idle 모드 해제 - 프레임 디코딩 재개"""
         if self.paused:
             self.paused = False
-            # Queue를 채울 시간 확보 (프레임 드롭 경고 방지)
-            time.sleep(0.2)
             logger.info("Video capture resumed")
+
+            # Queue를 즉시 리필 (Idle 복귀 시 빈 queue로 인한 CPU 스파이크 방지)
+            # Reader 스레드가 깨어나서 queue를 채울 때까지 대기
+            refill_timeout = 1.0  # 최대 1초 대기
+            refill_start = time.time()
+            while self.queue.qsize() < self.queue_size // 2 and time.time() - refill_start < refill_timeout:
+                time.sleep(0.05)
+
+            logger.info(f"Queue refilled: {self.queue.qsize()}/{self.queue_size} frames")
 
     def isOpened(self):
         """비디오가 열려있는지 확인"""

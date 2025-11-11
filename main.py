@@ -319,9 +319,12 @@ class WallpaperApp:
                     self.ui_manager.on_mouse_move()
 
                 # 마우스 움직임 감지 (Idle 타이머 관리)
-                # 실제로 마우스 위치가 변경되었을 때만 타이머 리셋
+                # 바탕화면 work area 내에서만 마우스가 움직일 때만 타이머 리셋
                 if (x, y) != prev_mouse_pos:
-                    self.last_activity_time = time.time()
+                    # work area 범위 체크 (바탕화면 영역 내에서만)
+                    if (self.work_area_left <= x <= self.work_area_left + self.work_area_width and
+                        self.work_area_top <= y <= self.work_area_top + self.work_area_height):
+                        self.last_activity_time = time.time()
                     prev_mouse_pos = (x, y)
 
                 # 마우스 버튼 상태
