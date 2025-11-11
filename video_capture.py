@@ -101,8 +101,19 @@ class ThreadedVideoCapture:
         - 예외 처리로 절전 모드 복귀 등 대응
         - 루프 재시작 시 프레임 카운터 리셋
         """
+        loop_count = 0
+        last_log_time = time.time()
+
         while not self.stopped:
             try:
+                loop_count += 1
+
+                # 10초마다 상태 로깅 (디버깅용)
+                if time.time() - last_log_time > 10:
+                    logger.info(f"Reader thread alive: loops={loop_count}, queue={self.queue.qsize()}/{self.queue_size}, paused={self.paused}")
+                    last_log_time = time.time()
+                    loop_count = 0
+
                 # Idle 모드 처리
                 if self.paused:
                     time.sleep(0.1)
@@ -118,24 +129,31 @@ class ThreadedVideoCapture:
                 # 프레임 스킵 처리 (읽기 단계에서 스킵)
                 if self.skip_ratio > 1 and self.frame_count % self.skip_ratio != 0:
                     # grab()은 프레임을 디코딩하지 않고 위치만 이동
+                    logger.debug(f"Calling cap.grab() (skip frame {self.frame_count})")
                     ret = self.cap.grab()
+                    logger.debug(f"cap.grab() returned: {ret}")
                     if not ret:
                         # 비디오 끝 - 루프 재시작
                         self._restart_video()
                     continue
 
                 # 필요한 프레임만 실제로 디코딩
+                logger.info(f"[TRACE] Calling cap.read() (frame {self.frame_count})")
                 ret, frame = self.cap.read()
+                logger.info(f"[TRACE] cap.read() returned: ret={ret}, frame={'valid' if frame is not None else 'None'}")
 
                 if not ret or frame is None:
                     # 비디오 끝 - 루프 재시작
+                    logger.debug("Restarting video (EOF or read failed)")
                     self._restart_video()
                     self.consecutive_errors = 0
                     continue
 
                 # 프레임을 큐에 추가
                 try:
+                    logger.debug(f"Putting frame to queue (size: {self.queue.qsize()}/{self.queue_size})")
                     self.queue.put((True, frame), timeout=0.1)
+                    logger.debug("Frame added to queue successfully")
                     self.consecutive_errors = 0
                 except:
                     # Queue put timeout - 프레임 드롭
