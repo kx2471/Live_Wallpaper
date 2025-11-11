@@ -5,6 +5,7 @@
 - 성능 메트릭 수집
 """
 import psutil
+import os
 import time
 from logger import get_logger
 
@@ -48,16 +49,21 @@ class PerformanceMonitor:
         # 동적 FPS 활성화 여부
         self.dynamic_fps_enabled = True
 
+        # 프로세스 CPU 모니터링 (전체 시스템 CPU가 아닌 우리 프로세스만)
+        self.process = psutil.Process(os.getpid())
+        self.process.cpu_percent(interval=None)  # 첫 호출 초기화
+
         logger.info(f"PerformanceMonitor initialized: target={target_fps}, range=[{min_fps}, {max_fps}]")
 
     def get_cpu_usage(self):
         """
-        CPU 사용률 이동 평균 계산
+        CPU 사용률 이동 평균 계산 (우리 프로세스만)
 
         Returns:
             float: CPU 사용률 (0-100)
         """
-        cpu = psutil.cpu_percent(interval=0.1)
+        # 우리 프로세스의 CPU만 측정 (Non-blocking)
+        cpu = self.process.cpu_percent(interval=None)
         self.cpu_history.append(cpu)
 
         # 이동 평균 유지

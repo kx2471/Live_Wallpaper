@@ -91,8 +91,10 @@ class WallpaperApp:
         # 상태 변수
         self.running = True
         self.is_idle = False
+        self.extended_idle = False  # 5분 이상 idle
         self.last_activity_time = time.time()
-        self.idle_threshold = 60.0  # 60초
+        self.idle_threshold = 60.0  # 60초 - 비디오 멈춤
+        self.extended_idle_threshold = 300.0  # 5분 - 자동 음소거
 
         # 설정 로드
         self.current_volume = config.get_volume()
@@ -381,7 +383,11 @@ class WallpaperApp:
                 time.sleep(0.1)
                 continue
 
-            time.sleep(0.02)  # ~50Hz
+            # Idle 상태일 때는 마우스 입력 체크 빈도를 낮춤
+            if self.is_idle:
+                time.sleep(0.2)  # Idle: ~5Hz (CPU 절약)
+            else:
+                time.sleep(0.02)  # Active: ~50Hz
 
         logger.info("Mouse input thread stopped")
 
@@ -498,26 +504,48 @@ class WallpaperApp:
     def check_idle_mode(self):
         """
         Idle 모드 체크
+        - 60초 idle: 비디오 멈춤
+        - 5분 idle: 자동 음소거 (복귀 시에도 음소거 유지)
 
         Returns:
             bool: Idle 상태 여부
         """
         current_time = time.time()
+        idle_duration = current_time - self.last_activity_time
 
-        if current_time - self.last_activity_time > self.idle_threshold:
+        # 60초 이상 idle (비디오 멈춤)
+        if idle_duration > self.idle_threshold:
             if not self.is_idle:
                 self.is_idle = True
                 if self.video_capture:
                     self.video_capture.pause()
-                logger.info("Idle mode activated")
+                logger.info("Idle mode activated (60s)")
+
+            # 5분 이상 idle (자동 음소거)
+            if idle_duration > self.extended_idle_threshold:
+                if not self.extended_idle:
+                    self.extended_idle = True
+                    # 음소거 처리 (복귀 시에도 유지됨)
+                    if not self.muted and self.audio_manager.has_audio:
+                        self.muted = True
+                        self.audio_manager.set_muted(True)
+                        config.set_muted(True)
+                        logger.info("Extended idle: Auto-muted (5min, persists on return)")
+
             return True
         else:
+            # Activity 복귀 (비디오만 재개, 음소거는 유지)
             if self.is_idle:
                 self.is_idle = False
                 if self.video_capture:
                     self.video_capture.resume()
-                self.last_activity_time = current_time
-                logger.info("Idle mode deactivated")
+                logger.info("Idle mode deactivated (video resumed, mute state preserved)")
+
+            # Extended idle 플래그 리셋 (음소거는 그대로)
+            if self.extended_idle:
+                self.extended_idle = False
+
+            self.last_activity_time = current_time
             return False
 
     def process_frame(self):
@@ -620,8 +648,10 @@ class WallpaperApp:
                 # 화면 업데이트
                 pygame.display.flip()
 
-                # FPS 제어
-                if self.performance_monitor:
+                # FPS 제어 (Idle 상태일 때 1 FPS로 낮춤)
+                if self.is_idle:
+                    self.clock.tick(1)  # Idle 모드: 1 FPS로 CPU 절약
+                elif self.performance_monitor:
                     self.clock.tick(self.performance_monitor.target_fps)
                 else:
                     self.clock.tick(30)
