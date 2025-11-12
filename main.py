@@ -270,6 +270,50 @@ class WallpaperApp:
         self.mouse_thread.start()
         logger.info("Mouse input thread started")
 
+    def _is_desktop_window(self, hwnd):
+        """
+        주어진 윈도우가 바탕화면 윈도우인지 확인
+
+        Args:
+            hwnd: 윈도우 핸들
+
+        Returns:
+            bool: 바탕화면 윈도우이면 True
+        """
+        try:
+            if hwnd == 0:
+                return False
+
+            # 윈도우 클래스명 가져오기
+            class_name = win32gui.GetClassName(hwnd)
+
+            # 바탕화면 관련 윈도우 클래스 확인
+            # - Progman: 기본 바탕화면
+            # - WorkerW: 동적 바탕화면 (Live Wallpaper가 이 안에 들어감)
+            # - SHELLDLL_DefView: 아이콘 표시 영역
+            # - SysListView32: 바탕화면 아이콘 리스트뷰 (SHELLDLL_DefView의 자식)
+            if class_name in ["Progman", "WorkerW", "SHELLDLL_DefView", "SysListView32"]:
+                return True
+
+            # pygame 창 자신도 체크 (바탕화면 역할이므로)
+            if hwnd == self.hwnd:
+                return True
+
+            # 부모 윈도우 체크 (최대 3단계까지 - WorkerW나 Progman의 자식/손자인지)
+            current = hwnd
+            for _ in range(3):
+                parent = win32gui.GetParent(current)
+                if parent == 0:
+                    break
+                parent_class = win32gui.GetClassName(parent)
+                if parent_class in ["Progman", "WorkerW", "SHELLDLL_DefView"]:
+                    return True
+                current = parent
+
+            return False
+        except:
+            return False
+
     def _mouse_input_loop(self):
         """
         마우스 입력 감지 루프 (별도 스레드)
@@ -278,7 +322,7 @@ class WallpaperApp:
         1. 마우스 위치 감지 및 버튼 호버
         2. 클릭 감지 (음소거, 설정)
         3. 볼륨 슬라이더 드래그
-        4. Idle 타이머 관리
+        4. Idle 타이머 관리 (바탕화면이 실제로 보일 때만)
         """
         VK_LBUTTON = 0x01
         prev_state = False
@@ -319,13 +363,23 @@ class WallpaperApp:
                     self.ui_manager.on_mouse_move()
 
                 # 마우스 움직임 감지 (Idle 타이머 관리)
-                # 바탕화면 work area 내에서만 마우스가 움직일 때만 타이머 리셋
+                # 바탕화면이 실제로 보이는 상태에서만 마우스 움직임 감지
                 if (x, y) != prev_mouse_pos:
-                    # work area 범위 체크 (바탕화면 영역 내에서만)
+                    prev_mouse_pos = (x, y)
+
+                    # work area 범위 내인지 확인
                     if (self.work_area_left <= x <= self.work_area_left + self.work_area_width and
                         self.work_area_top <= y <= self.work_area_top + self.work_area_height):
-                        self.last_activity_time = time.time()
-                    prev_mouse_pos = (x, y)
+                        # 마우스 커서 아래의 윈도우가 바탕화면인지 확인
+                        try:
+                            hwnd_under_cursor = win32gui.WindowFromPoint((x, y))
+                            is_desktop = self._is_desktop_window(hwnd_under_cursor)
+
+                            if is_desktop:
+                                # 바탕화면이 보이는 상태에서만 idle 타이머 리셋
+                                self.last_activity_time = time.time()
+                        except Exception as e:
+                            logger.error(f"Error checking window under cursor: {e}")
 
                 # 마우스 버튼 상태
                 current_state = win32api.GetAsyncKeyState(VK_LBUTTON) & 0x8000

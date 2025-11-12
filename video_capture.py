@@ -268,10 +268,20 @@ class ThreadedVideoCapture:
         logger.info(f"Target FPS updated to {target_fps}, new skip_ratio={self.skip_ratio}")
 
     def pause(self):
-        """Idle 모드 - 프레임 디코딩 일시정지"""
+        """Idle 모드 - 프레임 디코딩 일시정지 및 메모리 절약"""
         if not self.paused:
             self.paused = True
-            logger.info("Video capture paused (idle mode)")
+
+            # 메모리 절약: 큐에 있는 모든 프레임 비우기
+            cleared_frames = 0
+            while not self.queue.empty():
+                try:
+                    self.queue.get_nowait()
+                    cleared_frames += 1
+                except:
+                    break
+
+            logger.info(f"Video capture paused (idle mode) - cleared {cleared_frames} frames from queue")
 
     def resume(self):
         """Idle 모드 해제 - 프레임 디코딩 재개"""
