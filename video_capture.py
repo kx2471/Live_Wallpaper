@@ -120,7 +120,7 @@ class ThreadedVideoCapture:
 
                 # Idle 모드 처리
                 if self.paused:
-                    time.sleep(0.1)
+                    time.sleep(1.0)  # Idle 중 CPU 절약 (0.1 -> 1.0초)
                     continue
 
                 # 큐가 가득 차면 대기
