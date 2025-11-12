@@ -141,9 +141,12 @@ class ThreadedVideoCapture:
 
                         # grab() 실패 추적 (무한 루프 감지)
                         if self.consecutive_grab_fails >= self.max_grab_fails:
-                            logger.warning(f"cap.grab() failed {self.consecutive_grab_fails} times consecutively - forcing restart")
-                            self._restart_video()
-                            self.consecutive_grab_fails = 0
+                            logger.warning(f"cap.grab() failed {self.consecutive_grab_fails} times consecutively - reinitializing VideoCapture")
+                            if self._reinitialize_capture():
+                                logger.info("VideoCapture reinit successful, resuming from start")
+                            else:
+                                logger.error("VideoCapture reinit failed, will retry")
+                                time.sleep(1.0)  # 실패 시 1초 대기
                         else:
                             # 비디오 끝 - 루프 재시작
                             logger.info(f"[GRAB_FAIL] cap.grab() failed (consecutive: {self.consecutive_grab_fails}), restarting video")
@@ -200,6 +203,29 @@ class ThreadedVideoCapture:
             logger.debug("Video looped")
         except Exception as e:
             logger.error(f"Failed to restart video: {e}")
+
+    def _reinitialize_capture(self):
+        """VideoCapture 완전 재초기화 (손상 복구)"""
+        try:
+            logger.warning("Reinitializing VideoCapture due to persistent failures")
+
+            # 기존 capture 해제
+            if self.cap is not None:
+                self.cap.release()
+
+            # 새로 초기화
+            self.cap = cv2.VideoCapture(self.video_path, cv2.CAP_MSMF)
+            if not self.cap.isOpened():
+                logger.error("Failed to reinitialize VideoCapture")
+                return False
+
+            self.frame_count = 0
+            self.consecutive_grab_fails = 0
+            logger.info("VideoCapture reinitialized successfully")
+            return True
+        except Exception as e:
+            logger.error(f"Error reinitializing VideoCapture: {e}")
+            return False
 
     def read(self, timeout=1.0):
         """
